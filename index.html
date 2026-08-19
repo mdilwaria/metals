@@ -1,0 +1,1149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gold &amp; Silver Price Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js" integrity="sha384-iU8HYtnGQ8Cy4zl7gbNMOhsDTTKX02BTXptVP/vqAWIaTfM7isw76iyZCsjL2eVi" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/gridjs@5.0.2/dist/gridjs.umd.js" integrity="sha384-/XXDzxe4FsGiAe50i/u9pY/Vy/uX654MHB1xoc1BJNnH1WXHhqHga9g3q5tF4gj7" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridjs@5.0.2/dist/theme/mermaid.min.css" integrity="sha384-jZvDSsmGB9oGGT/4l9bHXGoAv1OxvG/cFmSo0dZaSqmBgvQTKDBFAMftlXTmMbNW" crossorigin="anonymous">
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 32px 48px;
+    background: #f7f6f3; color: #2b2926;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  .header-block { overflow: hidden; margin-bottom: 24px; }
+  .header-block h1 { font-size: 28px; margin: 0 0 4px; }
+  .header-topright { float: right; display: flex; align-items: flex-start; gap: 12px; margin: 0 0 8px 16px; }
+  .date-block { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+  .date-label { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: #8a847a; font-weight: 600; }
+  .date-label.spacer { visibility: hidden; }
+  .date-badge, .refresh-outer {
+    height: 70px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
+    border-radius: 16px; white-space: nowrap; background: #fff; border: 1px solid #e8e5df;
+  }
+  .date-badge { font-size: 28px; font-weight: 700; color: #2b2926; padding: 0 42px; }
+  .refresh-outer { padding: 0 16px; }
+  button#refreshBtn {
+    background: #1f1d1b; color: #fff; border: none; border-radius: 8px;
+    padding: 10px 16px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;
+  }
+  button#refreshBtn:hover:not(:disabled) { background: #3a3733; }
+  button#refreshBtn:disabled { opacity: 0.5; cursor: default; }
+  .subtitle-list { color: #6b6660; font-size: 13px; margin: 0; padding-left: 18px; }
+  .subtitle-list li { margin-bottom: 4px; }
+  .subtitle-list li:last-child { margin-bottom: 0; }
+  /* Gold group (left), Silver group (right), Ratio group (last) must always
+     stay in this fixed left-to-right arrangement — never wrap onto separate
+     rows or reorder, at any window width. Only their widths scale down
+     together (flex-basis 0 + min-width 0 lets them shrink past content
+     size instead of wrapping or overflowing). */
+  .price-row { display: flex; gap: 16px; margin-bottom: 28px; flex-wrap: nowrap; align-items: stretch; }
+  .price-group { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; flex: 1 1 0; min-width: 0; }
+  .price-group .price-card { min-width: 0; flex: none; }
+  .price-card {
+    flex: 1 1 220px; background: #fff; border: 1px solid #e8e5df; border-radius: 12px;
+    padding: 16px 20px; min-width: 200px;
+  }
+  .price-card .label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: #8a847a; margin-bottom: 6px; }
+  .price-card .value { font-size: 28px; font-weight: 600; color: #1f1d1b; }
+  .price-card .meta { font-size: 12px; color: #8a847a; margin-top: 6px; }
+  .price-card.gold .value { color: #a3791a; }
+  .price-card.silver .value { color: #5f6a73; }
+  .price-card.ratio .value { color: #7a4fae; }
+  .price-card.change { flex: 1 1 170px; min-width: 150px; }
+  .price-card.change .value { font-size: 28px; }
+  .price-card.buysell .value { font-size: 22px; }
+  .price-card .value.change-positive { color: #1a7f37; }
+  .price-card .value.change-negative { color: #c0392b; }
+  .value.change-bold { font-weight: 800; }
+  section { background: #fff; border: 1px solid #e8e5df; border-radius: 12px; padding: 20px; margin-bottom: 24px; }
+  section h2 { font-size: 15px; margin: 0 0 14px; color: #2b2926; }
+  .chart-wrap { position: relative; height: 360px; }
+  /* Charts and tables are grouped Gold | Silver | Ratio, three across, using
+     the exact same gap and flex:1 1 0/min-width:0/nowrap recipe as the price
+     boxes above (.price-row) — so their column edges line up with the Gold/
+     Silver/Ratio price boxes, and like those boxes, they never wrap onto
+     separate rows at any window width; only their widths scale down
+     together. */
+  .triple-row { display: flex; gap: 16px; flex-wrap: nowrap; margin-bottom: 24px; }
+  .triple-row > section { flex: 1 1 0; min-width: 0; margin-bottom: 0; }
+  /* One search box per period (Daily / Monthly), sitting above that period's
+     three tables instead of each table having its own — typing here filters
+     all three of that period's tables at once (see applyGroupSearch in the
+     script below). */
+  .group-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 0 10px; }
+  .group-header h2 { margin: 0; font-size: 15px; color: #2b2926; }
+  input.group-search {
+    font-family: inherit; font-size: 13px; color: #2b2926; background: #fff;
+    border: 1px solid #cfcac0; border-radius: 6px; padding: 7px 10px;
+    width: 240px; max-width: 45%; box-sizing: border-box;
+  }
+  table.simple { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.simple th, table.simple td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #eee; }
+  table.simple th { color: #8a847a; font-weight: 600; font-size: 11px; text-transform: uppercase; }
+  /* Each table now lives in a ~1/3-page-width card (triple-row). Grid.js's
+     own container/search-box markup defaults to intrinsic/fixed widths that
+     are wider than that, which used to force a horizontal scrollbar. Pin
+     every layer (container, head, search input, wrapper, table) to the
+     card's own width so nothing can ever push past it. */
+  .gridjs-container { width: 100% !important; max-width: 100%; box-sizing: border-box; overflow-x: hidden; }
+  .gridjs-head { width: 100%; box-sizing: border-box; }
+  .gridjs-search { width: 100%; }
+  input.gridjs-input { width: 100% !important; max-width: 100%; box-sizing: border-box; }
+  .gridjs-wrapper { border-radius: 8px !important; max-height: 480px; overflow-y: auto; overflow-x: hidden; width: 100%; }
+  .gridjs-wrapper thead th { position: sticky; top: 0; z-index: 1; }
+  /* Fixed layout so the per-column % widths below are honored exactly and the
+     table always fills its section (never overflows it), regardless of
+     window size. */
+  table.gridjs-table { width: 100% !important; table-layout: fixed; }
+  /* Wrap instead of truncating. With table-layout: fixed each column keeps
+     its assigned % width regardless of content, so wrapping is the only way
+     to guarantee no value is ever cut off (an ellipsis would silently hide
+     digits) — cells just grow taller instead. */
+  table.gridjs-table th, table.gridjs-table td { overflow-wrap: break-word; word-break: break-word; white-space: normal; }
+  /* Column widths are enforced here, in CSS, by cell position — NOT via
+     Grid.js's own per-column "width" option. Grid.js converts a "33%"
+     column-width config into a one-time pixel value (measured against the
+     container's width at the moment the grid mounts) and stamps that fixed
+     px onto each <th>; it never recalculates on resize, so columns drift
+     out of proportion — or even overflow and get clipped by overflow-x:
+     hidden above — the moment the window is resized (or if layout wasn't
+     fully settled at mount). Percentage widths declared here instead, keyed
+     by column position and scoped per table via each table's own container
+     id, are live CSS and stay correct at any viewport width automatically,
+     with !important to beat any inline style Grid.js still applies. */
+  #dailyGoldTable table th:nth-child(1), #dailyGoldTable table td:nth-child(1),
+  #dailySilverTable table th:nth-child(1), #dailySilverTable table td:nth-child(1),
+  #monthlyGoldTable table th:nth-child(1), #monthlyGoldTable table td:nth-child(1),
+  #monthlySilverTable table th:nth-child(1), #monthlySilverTable table td:nth-child(1),
+  #monthlyRatioTable table th:nth-child(1), #monthlyRatioTable table td:nth-child(1) { width: 33.34% !important; }
+  #dailyGoldTable table th:nth-child(2), #dailyGoldTable table td:nth-child(2),
+  #dailySilverTable table th:nth-child(2), #dailySilverTable table td:nth-child(2),
+  #monthlyGoldTable table th:nth-child(2), #monthlyGoldTable table td:nth-child(2),
+  #monthlySilverTable table th:nth-child(2), #monthlySilverTable table td:nth-child(2),
+  #monthlyRatioTable table th:nth-child(2), #monthlyRatioTable table td:nth-child(2),
+  #dailyGoldTable table th:nth-child(3), #dailyGoldTable table td:nth-child(3),
+  #dailySilverTable table th:nth-child(3), #dailySilverTable table td:nth-child(3),
+  #monthlyGoldTable table th:nth-child(3), #monthlyGoldTable table td:nth-child(3),
+  #monthlySilverTable table th:nth-child(3), #monthlySilverTable table td:nth-child(3),
+  #monthlyRatioTable table th:nth-child(3), #monthlyRatioTable table td:nth-child(3) { width: 33.33% !important; }
+  #dailyRatioTable table th:nth-child(1), #dailyRatioTable table td:nth-child(1),
+  #dailyRatioTable table th:nth-child(2), #dailyRatioTable table td:nth-child(2) { width: 50% !important; }
+  .footer-note { font-size: 11px; color: #a19c92; margin-top: 4px; }
+  .range-row { display: flex; align-items: center; gap: 20px; }
+  .range-slider-wrap { flex: 1 1 auto; min-width: 0; }
+  .range-labels { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 13px; font-weight: 600; color: #2b2926; margin-bottom: 10px; }
+  input.date-input {
+    font-family: inherit; font-size: 13px; font-weight: 600; color: #2b2926;
+    background: #fff; border: 1px solid #cfcac0; border-radius: 6px; padding: 5px 8px; cursor: pointer;
+  }
+  input.date-input:focus { outline: 2px solid #1f1d1b22; }
+  .range-slider { position: relative; height: 20px; }
+  .range-slider .track-bg, .range-slider .track-highlight {
+    position: absolute; top: 50%; transform: translateY(-50%); height: 4px; border-radius: 2px;
+  }
+  .range-slider .track-bg { left: 0; right: 0; background: #e8e5df; }
+  .range-slider .track-highlight { background: #1f1d1b; }
+  .range-slider input[type="range"] {
+    position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%);
+    width: 100%; margin: 0; background: transparent; pointer-events: none;
+    -webkit-appearance: none; appearance: none;
+  }
+  .range-slider input[type="range"]::-webkit-slider-runnable-track { -webkit-appearance: none; background: transparent; height: 4px; }
+  .range-slider input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; pointer-events: auto; width: 18px; height: 18px; border-radius: 50%;
+    background: #1f1d1b; border: 2px solid #fff; box-shadow: 0 0 0 1px #c9c4ba; cursor: pointer; margin-top: 0;
+  }
+  .range-slider input[type="range"]::-moz-range-track { background: transparent; height: 4px; border: none; }
+  .range-slider input[type="range"]::-moz-range-thumb {
+    pointer-events: auto; width: 18px; height: 18px; border-radius: 50%;
+    background: #1f1d1b; border: 2px solid #fff; box-shadow: 0 0 0 1px #c9c4ba; cursor: pointer;
+  }
+  .range-actions { display: flex; flex-direction: column; gap: 8px; flex: 0 0 auto; }
+  button#filterBtn, button#resetBtn {
+    flex: 0 0 auto; border-radius: 8px; padding: 10px 18px; font-size: 13px;
+    font-weight: 600; cursor: pointer; font-family: inherit;
+  }
+  button#filterBtn { background: #1f1d1b; color: #fff; border: none; }
+  button#filterBtn:hover { background: #3a3733; }
+  button#resetBtn { background: #fff; color: #1f1d1b; border: 1px solid #cfcac0; }
+  button#resetBtn:hover { background: #f7f6f3; }
+
+  /* ---------- Mobile ----------
+     Every "never wrap, only shrink" row above (price boxes, chart rows,
+     table rows) is a deliberate desktop/tablet behavior. Below this
+     breakpoint that stops working well — three columns of real content
+     can't shrink to phone width and stay legible — so on phones we
+     switch those same rows to stack vertically instead, one item after
+     another, full width. */
+  @media (max-width: 700px) {
+    body { padding: 16px 16px 32px; }
+    section { padding: 16px; }
+    .header-block h1 { font-size: 22px; }
+    .header-topright {
+      float: none; width: 100%; flex-direction: column; align-items: stretch;
+      gap: 10px; margin: 0 0 16px;
+    }
+    .header-topright .date-block { align-items: stretch; }
+    .date-badge, .refresh-outer { width: 100%; }
+    .date-badge { font-size: 22px; padding: 0 16px; }
+    .price-row { flex-direction: column; }
+    .price-group { grid-template-columns: 1fr; }
+    .price-card .value { font-size: 24px; }
+    .price-card.change .value { font-size: 24px; }
+    .triple-row { flex-direction: column; }
+    .chart-wrap { height: 280px; }
+    .group-header { flex-direction: column; align-items: stretch; gap: 8px; }
+    input.group-search { width: 100%; max-width: 100%; }
+    .range-row { flex-direction: column; align-items: stretch; gap: 14px; }
+    .range-actions { flex-direction: row; width: 100%; }
+    .range-actions button { flex: 1 1 0; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header-block">
+  <div class="header-topright">
+    <div class="date-block">
+      <div class="date-label spacer" aria-hidden="true">&nbsp;</div>
+      <div class="refresh-outer">
+        <button id="refreshBtn">Refresh now</button>
+      </div>
+      <div class="footer-note" id="cacheNote"></div>
+      <div class="footer-note" id="workbookStatus"></div>
+    </div>
+    <div class="date-block">
+      <div class="date-label">Today&rsquo;s Date</div>
+      <div class="date-badge">Aug-18-2026</div>
+    </div>
+  </div>
+  <h1>Gold &amp; Silver Price Dashboard</h1>
+  <ul class="subtitle-list">
+    <li>Tracks gold and silver spot prices starting Jan 1, 2025 &mdash; daily moves, monthly trends, and the gold/silver ratio.</li>
+    <li>Price cards above show the latest fetched price; the charts and tables below show the full history.</li>
+    <li>Buy/Sell boxes are indicative dealer pricing computed from the spot price: Gold buy = spot + 3.5%, sell = spot &minus; 2.5%; Silver buy = spot + $5.00, sell = spot &minus; $2.50.</li>
+    <li>Click &ldquo;Refresh now&rdquo; to pull the latest live price &mdash; it only fetches a new price if the last fetch was 30+ minutes ago, so clicking sooner won&rsquo;t change anything.</li>
+  </ul>
+</div>
+
+<div class="price-row">
+  <div class="price-group">
+    <div class="price-card gold">
+      <div class="label">Gold ($/oz)</div>
+      <div class="value" id="goldValue">&mdash;</div>
+      <div class="meta" id="goldMeta">Loading&hellip;</div>
+    </div>
+    <div class="price-card change">
+      <div class="label">Gold vs. Yesterday</div>
+      <div class="value" id="goldChangeValue">&mdash;</div>
+      <div class="meta" id="goldChangeMeta"></div>
+    </div>
+    <div class="price-card gold buysell">
+      <div class="label">Gold Buy Price</div>
+      <div class="value" id="goldBuyValue">&mdash;</div>
+      <div class="meta">Spot + 3.5%</div>
+    </div>
+    <div class="price-card gold buysell">
+      <div class="label">Gold Sell Price</div>
+      <div class="value" id="goldSellValue">&mdash;</div>
+      <div class="meta">Spot &minus; 2.5%</div>
+    </div>
+  </div>
+
+  <div class="price-group">
+    <div class="price-card silver">
+      <div class="label">Silver ($/oz)</div>
+      <div class="value" id="silverValue">&mdash;</div>
+      <div class="meta" id="silverMeta">Loading&hellip;</div>
+    </div>
+    <div class="price-card change">
+      <div class="label">Silver vs. Yesterday</div>
+      <div class="value" id="silverChangeValue">&mdash;</div>
+      <div class="meta" id="silverChangeMeta"></div>
+    </div>
+    <div class="price-card silver buysell">
+      <div class="label">Silver Buy Price</div>
+      <div class="value" id="silverBuyValue">&mdash;</div>
+      <div class="meta">Spot + $5.00</div>
+    </div>
+    <div class="price-card silver buysell">
+      <div class="label">Silver Sell Price</div>
+      <div class="value" id="silverSellValue">&mdash;</div>
+      <div class="meta">Spot &minus; $2.50</div>
+    </div>
+  </div>
+
+  <div class="price-group">
+    <div class="price-card ratio">
+      <div class="label">Gold/Silver Ratio</div>
+      <div class="value" id="ratioValue">&mdash;</div>
+      <div class="meta" id="ratioMeta">Loading&hellip;</div>
+    </div>
+    <div class="price-card change">
+      <div class="label">Ratio vs. Yesterday</div>
+      <div class="value" id="ratioChangeValue">&mdash;</div>
+      <div class="meta" id="ratioChangeMeta"></div>
+    </div>
+  </div>
+</div>
+
+<section>
+  <h2>Date Range</h2>
+  <div class="range-row">
+    <div class="range-slider-wrap">
+      <div class="range-labels">
+        <input type="date" id="startDateInput" class="date-input" aria-label="Start date">
+        <input type="date" id="endDateInput" class="date-input" aria-label="End date">
+      </div>
+      <div class="range-slider">
+        <div class="track-bg"></div>
+        <div class="track-highlight" id="trackHighlight"></div>
+        <input type="range" id="startRange">
+        <input type="range" id="endRange">
+      </div>
+    </div>
+    <div class="range-actions">
+      <button id="filterBtn">Filter</button>
+      <button id="resetBtn">Reset</button>
+    </div>
+  </div>
+</section>
+
+<div class="group-header">
+  <h2>Daily Price</h2>
+</div>
+<div class="triple-row">
+  <section>
+    <h2>Gold</h2>
+    <div class="chart-wrap"><canvas id="dailyGoldChart"></canvas></div>
+  </section>
+  <section>
+    <h2>Silver</h2>
+    <div class="chart-wrap"><canvas id="dailySilverChart"></canvas></div>
+  </section>
+  <section>
+    <h2>Ratio</h2>
+    <div class="chart-wrap"><canvas id="dailyRatioChart"></canvas></div>
+  </section>
+</div>
+
+<div class="group-header">
+  <h2>Monthly Price</h2>
+</div>
+<div class="triple-row">
+  <section>
+    <h2>Gold</h2>
+    <div class="chart-wrap"><canvas id="monthlyGoldChart"></canvas></div>
+  </section>
+  <section>
+    <h2>Silver</h2>
+    <div class="chart-wrap"><canvas id="monthlySilverChart"></canvas></div>
+  </section>
+  <section>
+    <h2>Ratio</h2>
+    <div class="chart-wrap"><canvas id="monthlyRatioChart"></canvas></div>
+  </section>
+</div>
+
+<div class="group-header">
+  <h2>Daily Data</h2>
+  <input type="text" id="dailySearchInput" class="group-search" placeholder="Search daily data&hellip;">
+</div>
+<div class="triple-row">
+  <section>
+    <h2>Gold</h2>
+    <div id="dailyGoldTable"></div>
+  </section>
+  <section>
+    <h2>Silver</h2>
+    <div id="dailySilverTable"></div>
+  </section>
+  <section>
+    <h2>Ratio</h2>
+    <div id="dailyRatioTable"></div>
+  </section>
+</div>
+
+<div class="group-header">
+  <h2>Monthly Data</h2>
+  <input type="text" id="monthlySearchInput" class="group-search" placeholder="Search monthly data&hellip;">
+</div>
+<div class="triple-row">
+  <section>
+    <h2>Gold</h2>
+    <div id="monthlyGoldTable"></div>
+  </section>
+  <section>
+    <h2>Silver</h2>
+    <div id="monthlySilverTable"></div>
+  </section>
+  <section>
+    <h2>Ratio</h2>
+    <div id="monthlyRatioTable"></div>
+  </section>
+</div>
+
+<div class="footer-note">Source: Alpha Vantage GOLD_SILVER_HISTORY / GOLD_SILVER_SPOT. This dashboard's charts and tables reflect the data fetched from Alpha Vantage API as of the last fetch.</div>
+
+<script>
+const DAILY = [{"date": "2025-01-01", "gold": 2624.3971, "silver": 28.8916, "ratio": 90.83599039167093}, {"date": "2025-01-02", "gold": 2625.5478, "silver": 29.0, "ratio": 90.53613103448275}, {"date": "2025-01-03", "gold": 2660.8447, "silver": 29.5491, "ratio": 90.04824850841482}, {"date": "2025-01-04", "gold": 2639.6807, "silver": 29.6166, "ratio": 89.1284178467481}, {"date": "2025-01-05", "gold": 2640.1218, "silver": 29.6162, "ratio": 89.14451550165113}, {"date": "2025-01-06", "gold": 2640.9711, "silver": 29.6412, "ratio": 89.09798186308247}, {"date": "2025-01-07", "gold": 2634.5824, "silver": 29.9369, "ratio": 88.00451616566845}, {"date": "2025-01-08", "gold": 2649.46, "silver": 30.0812, "ratio": 88.07693842000984}, {"date": "2025-01-09", "gold": 2661.9922, "silver": 30.1164, "ratio": 88.39011966901755}, {"date": "2025-01-10", "gold": 2669.9689, "silver": 30.1007, "ratio": 88.70122289514862}, {"date": "2025-01-11", "gold": 2689.3056, "silver": 30.4078, "ratio": 88.44130782233506}, {"date": "2025-01-12", "gold": 2689.3483, "silver": 30.4076, "ratio": 88.44329378181772}, {"date": "2025-01-13", "gold": 2692.3155, "silver": 30.4733, "ratio": 88.34998178733515}, {"date": "2025-01-14", "gold": 2667.6384, "silver": 29.6564, "ratio": 89.95152479734558}, {"date": "2025-01-15", "gold": 2674.9361, "silver": 29.8384, "ratio": 89.64743753016248}, {"date": "2025-01-16", "gold": 2694.4577, "silver": 30.6555, "ratio": 87.89475624276231}, {"date": "2025-01-17", "gold": 2715.1579, "silver": 30.7674, "ratio": 88.2478824990087}, {"date": "2025-01-18", "gold": 2702.7823, "silver": 30.3564, "ratio": 89.03500744488805}, {"date": "2025-01-19", "gold": 2702.6034, "silver": 30.3612, "ratio": 89.01503893126754}, {"date": "2025-01-20", "gold": 2694.1716, "silver": 30.2962, "ratio": 88.92770710518151}, {"date": "2025-01-21", "gold": 2710.2408, "silver": 30.585, "ratio": 88.61339872486514}, {"date": "2025-01-22", "gold": 2744.7139, "silver": 30.7654, "ratio": 89.21430893146197}, {"date": "2025-01-23", "gold": 2754.1214, "silver": 30.7752, "ratio": 89.49158413267826}, {"date": "2025-01-24", "gold": 2755.1427, "silver": 30.4693, "ratio": 90.42356404643361}, {"date": "2025-01-25", "gold": 2770.8698, "silver": 30.6183, "ratio": 90.49717979117064}, {"date": "2025-01-26", "gold": 2771.018, "silver": 30.616, "ratio": 90.5088189182127}, {"date": "2025-01-27", "gold": 2767.0539, "silver": 30.5221, "ratio": 90.65738923599622}, {"date": "2025-01-28", "gold": 2742.2233, "silver": 30.1892, "ratio": 90.83457991599646}, {"date": "2025-01-29", "gold": 2762.5477, "silver": 30.4232, "ratio": 90.80398182965631}, {"date": "2025-01-30", "gold": 2759.8838, "silver": 30.8644, "ratio": 89.41964852710566}, {"date": "2025-01-31", "gold": 2797.2951, "silver": 31.6496, "ratio": 88.38326866690258}, {"date": "2025-02-01", "gold": 2799.1485, "silver": 31.3258, "ratio": 89.35601006199362}, {"date": "2025-02-02", "gold": 2799.1007, "silver": 31.3493, "ratio": 89.28750243227121}, {"date": "2025-02-03", "gold": 2794.8184, "silver": 31.1127, "ratio": 89.82886088317633}, {"date": "2025-02-04", "gold": 2813.883, "silver": 31.502, "ratio": 89.32394768586121}, {"date": "2025-02-05", "gold": 2841.5307, "silver": 32.0863, "ratio": 88.55900181697484}, {"date": "2025-02-06", "gold": 2869.2667, "silver": 32.3403, "ratio": 88.72109102265595}, {"date": "2025-02-07", "gold": 2858.7258, "silver": 32.2294, "ratio": 88.69931801398724}, {"date": "2025-02-08", "gold": 2861.1108, "silver": 31.8144, "ratio": 89.93131412190706}, {"date": "2025-02-09", "gold": 2860.6844, "silver": 31.8144, "ratio": 89.91791138603904}, {"date": "2025-02-10", "gold": 2868.1426, "silver": 31.8244, "ratio": 90.12401176455802}, {"date": "2025-02-11", "gold": 2916.8823, "silver": 32.079, "ratio": 90.92809314504817}, {"date": "2025-02-12", "gold": 2896.0752, "silver": 31.8226, "ratio": 91.0068693318585}, {"date": "2025-02-13", "gold": 2906.6666, "silver": 32.2846, "ratio": 90.03260378013047}, {"date": "2025-02-14", "gold": 2929.1085, "silver": 32.3604, "ratio": 90.51521303815775}, {"date": "2025-02-15", "gold": 2882.3993, "silver": 32.1465, "ratio": 89.66448291415861}, {"date": "2025-02-16", "gold": 2882.445, "silver": 32.1446, "ratio": 89.67120449468963}, {"date": "2025-02-17", "gold": 2885.2476, "silver": 32.0743, "ratio": 89.95512294890302}, {"date": "2025-02-18", "gold": 2899.3844, "silver": 32.3904, "ratio": 89.51369541592571}, {"date": "2025-02-19", "gold": 2933.9322, "silver": 32.8985, "ratio": 89.1813365351004}, {"date": "2025-02-20", "gold": 2937.0137, "silver": 32.7384, "ratio": 89.71158333944237}, {"date": "2025-02-21", "gold": 2941.1272, "silver": 32.9477, "ratio": 89.26654060829739}, {"date": "2025-02-22", "gold": 2936.3479, "silver": 32.51, "ratio": 90.3213749615503}, {"date": "2025-02-23", "gold": 2935.9531, "silver": 32.4868, "ratio": 90.37372409717177}, {"date": "2025-02-24", "gold": 2937.3303, "silver": 32.5834, "ratio": 90.1480600551201}, {"date": "2025-02-25", "gold": 2951.9755, "silver": 32.2857, "ratio": 91.43290992606634}, {"date": "2025-02-26", "gold": 2920.5778, "silver": 31.7886, "ratio": 91.8750055051182}, {"date": "2025-02-27", "gold": 2918.4904, "silver": 31.8738, "ratio": 91.56393024992315}, {"date": "2025-02-28", "gold": 2875.5249, "silver": 31.2212, "ratio": 92.101677706174}, {"date": "2025-03-01", "gold": 2857.6834, "silver": 31.1488, "ratio": 91.74296923155947}, {"date": "2025-03-02", "gold": 2857.6899, "silver": 31.1545, "ratio": 91.7263926559566}, {"date": "2025-03-03", "gold": 2868.684, "silver": 31.1912, "ratio": 91.97094052168562}, {"date": "2025-03-04", "gold": 2891.3893, "silver": 31.6606, "ratio": 91.32452638294916}, {"date": "2025-03-05", "gold": 2912.8796, "silver": 31.913, "ratio": 91.2756431548272}, {"date": "2025-03-06", "gold": 2918.8379, "silver": 32.6212, "ratio": 89.47671759469301}, {"date": "2025-03-07", "gold": 2909.3711, "silver": 32.6263, "ratio": 89.17257243389535}, {"date": "2025-03-08", "gold": 2909.9002, "silver": 32.5247, "ratio": 89.46739554861382}, {"date": "2025-03-09", "gold": 2909.8172, "silver": 32.5287, "ratio": 89.45384229926188}, {"date": "2025-03-10", "gold": 2916.6449, "silver": 32.5783, "ratio": 89.52722824702332}, {"date": "2025-03-11", "gold": 2884.9064, "silver": 32.0234, "ratio": 90.08744855324542}, {"date": "2025-03-12", "gold": 2914.4951, "silver": 32.847, "ratio": 88.72941516729077}, {"date": "2025-03-13", "gold": 2938.1484, "silver": 33.2831, "ratio": 88.2774861716607}, {"date": "2025-03-14", "gold": 2986.1398, "silver": 33.8529, "ratio": 88.20927601475798}, {"date": "2025-03-15", "gold": 2985.703, "silver": 33.7862, "ratio": 88.37048854265943}, {"date": "2025-03-16", "gold": 2984.9169, "silver": 33.7931, "ratio": 88.32918258461046}, {"date": "2025-03-17", "gold": 2989.9371, "silver": 33.7866, "ratio": 88.49476123670331}, {"date": "2025-03-18", "gold": 3000.9771, "silver": 33.7878, "ratio": 88.8183634329551}, {"date": "2025-03-19", "gold": 3031.3879, "silver": 33.9655, "ratio": 89.24902916194374}, {"date": "2025-03-20", "gold": 3053.1983, "silver": 33.8989, "ratio": 90.06776916065124}, {"date": "2025-03-21", "gold": 3046.8873, "silver": 33.5408, "ratio": 90.84122322663741}, {"date": "2025-03-22", "gold": 3023.1217, "silver": 33.0332, "ratio": 91.51767615610962}, {"date": "2025-03-23", "gold": 3023.7159, "silver": 33.0338, "ratio": 91.53400153781885}, {"date": "2025-03-24", "gold": 3025.5026, "silver": 33.0672, "ratio": 91.49557870034354}, {"date": "2025-03-25", "gold": 3010.3082, "silver": 32.9385, "ratio": 91.39178165368794}, {"date": "2025-03-26", "gold": 3021.1845, "silver": 33.6595, "ratio": 89.75726020885634}, {"date": "2025-03-27", "gold": 3024.2216, "silver": 33.6739, "ratio": 89.80906874463604}, {"date": "2025-03-28", "gold": 3057.0775, "silver": 34.4111, "ratio": 88.83986562475481}, {"date": "2025-03-29", "gold": 3085.3342, "silver": 34.1233, "ratio": 90.41722811099747}, {"date": "2025-03-30", "gold": 3085.5741, "silver": 34.1203, "ratio": 90.4322089782329}, {"date": "2025-03-31", "gold": 3085.1381, "silver": 34.1937, "ratio": 90.22533683105368}, {"date": "2025-04-01", "gold": 3123.0003, "silver": 34.0437, "ratio": 91.73504348822249}, {"date": "2025-04-02", "gold": 3113.8796, "silver": 33.6483, "ratio": 92.54195902913372}, {"date": "2025-04-03", "gold": 3159.3001, "silver": 33.756, "ratio": 93.59225322905557}, {"date": "2025-04-04", "gold": 3114.185, "silver": 31.9548, "ratio": 97.45593776208895}, {"date": "2025-04-05", "gold": 3037.8323, "silver": 29.5896, "ratio": 102.66554127125747}, {"date": "2025-04-06", "gold": 3038.0048, "silver": 29.5909, "ratio": 102.6668604199264}, {"date": "2025-04-07", "gold": 3001.6248, "silver": 28.6658, "ratio": 104.71100754208848}, {"date": "2025-04-08", "gold": 2983.8018, "silver": 30.0393, "ratio": 99.32993778150623}, {"date": "2025-04-09", "gold": 2979.285, "silver": 29.6421, "ratio": 100.50856720677685}, {"date": "2025-04-10", "gold": 3083.3583, "silver": 30.9239, "ratio": 99.7079378732954}, {"date": "2025-04-11", "gold": 3186.3583, "silver": 31.1449, "ratio": 102.30754633985018}, {"date": "2025-04-12", "gold": 3237.4257, "silver": 32.2958, "ratio": 100.24293251754098}, {"date": "2025-04-13", "gold": 3237.8796, "silver": 32.2955, "ratio": 100.2579182858293}, {"date": "2025-04-14", "gold": 3222.0398, "silver": 32.0861, "ratio": 100.41855507525065}, {"date": "2025-04-15", "gold": 3211.4564, "silver": 32.2442, "ratio": 99.59795560131745}, {"date": "2025-04-16", "gold": 3258.2895, "silver": 32.382, "ratio": 100.6203909579396}, {"date": "2025-04-17", "gold": 3346.1995, "silver": 32.7961, "ratio": 102.03040910352145}, {"date": "2025-04-18", "gold": 3326.2008, "silver": 32.5111, "ratio": 102.30969730338255}, {"date": "2025-04-19", "gold": 3326.3557, "silver": 32.5218, "ratio": 102.28079934074991}, {"date": "2025-04-20", "gold": 3326.2739, "silver": 32.5019, "ratio": 102.34090622394383}, {"date": "2025-04-21", "gold": 3354.1548, "silver": 32.5814, "ratio": 102.94692063570011}, {"date": "2025-04-22", "gold": 3418.953, "silver": 32.6677, "ratio": 104.65851590408873}, {"date": "2025-04-23", "gold": 3338.6585, "silver": 32.6018, "ratio": 102.40718303897332}, {"date": "2025-04-24", "gold": 3314.4245, "silver": 33.6302, "ratio": 98.55500413318981}, {"date": "2025-04-25", "gold": 3353.4417, "silver": 33.643, "ratio": 99.67724935350593}, {"date": "2025-04-26", "gold": 3319.1715, "silver": 33.1013, "ratio": 100.27314637189475}, {"date": "2025-04-27", "gold": 3319.2112, "silver": 33.0944, "ratio": 100.29525236898085}, {"date": "2025-04-28", "gold": 3307.7402, "silver": 33.0023, "ratio": 100.22756595752418}, {"date": "2025-04-29", "gold": 3335.5804, "silver": 33.1071, "ratio": 100.75121046542885}, {"date": "2025-04-30", "gold": 3321.565, "silver": 32.948, "ratio": 100.81234065800656}, {"date": "2025-05-01", "gold": 3273.5775, "silver": 32.636, "ratio": 100.30572067655349}, {"date": "2025-05-02", "gold": 3239.646, "silver": 32.4519, "ratio": 99.82916254518226}, {"date": "2025-05-03", "gold": 3240.9585, "silver": 32.0186, "ratio": 101.2211183499591}, {"date": "2025-05-04", "gold": 3240.9154, "silver": 32.0143, "ratio": 101.23336758885873}, {"date": "2025-05-05", "gold": 3247.1275, "silver": 32.0381, "ratio": 101.35206207609066}, {"date": "2025-05-06", "gold": 3332.699, "silver": 32.5167, "ratio": 102.49191953673036}, {"date": "2025-05-07", "gold": 3397.2122, "silver": 33.1385, "ratio": 102.51556950374942}, {"date": "2025-05-08", "gold": 3374.5706, "silver": 32.4617, "ratio": 103.95544903686498}, {"date": "2025-05-09", "gold": 3319.35, "silver": 32.4768, "ratio": 102.20680608926989}, {"date": "2025-05-10", "gold": 3325.5991, "silver": 32.7291, "ratio": 101.60985483866038}, {"date": "2025-05-11", "gold": 3325.5571, "silver": 32.7325, "ratio": 101.5980172611319}, {"date": "2025-05-12", "gold": 3287.338, "silver": 32.6757, "ratio": 100.60497556288007}, {"date": "2025-05-13", "gold": 3237.7768, "silver": 32.5849, "ratio": 99.36433133138357}, {"date": "2025-05-14", "gold": 3248.6529, "silver": 32.9269, "ratio": 98.66257983593961}, {"date": "2025-05-15", "gold": 3182.4441, "silver": 32.17, "ratio": 98.92583462853591}, {"date": "2025-05-16", "gold": 3240.572, "silver": 32.641, "ratio": 99.27918875034467}, {"date": "2025-05-17", "gold": 3200.3984, "silver": 32.2829, "ratio": 99.13602557391066}, {"date": "2025-05-18", "gold": 3202.999, "silver": 32.2892, "ratio": 99.19722383955006}, {"date": "2025-05-19", "gold": 3237.933, "silver": 32.4768, "ratio": 99.69987806680462}, {"date": "2025-05-20", "gold": 3223.2019, "silver": 32.3551, "ratio": 99.61959320169}, {"date": "2025-05-21", "gold": 3291.6707, "silver": 33.106, "ratio": 99.42822147042833}, {"date": "2025-05-22", "gold": 3322.9933, "silver": 33.5003, "ratio": 99.19294155574725}, {"date": "2025-05-23", "gold": 3294.704, "silver": 33.049, "ratio": 99.69148839601804}, {"date": "2025-05-24", "gold": 3357.876, "silver": 33.4885, "ratio": 100.26952535945175}, {"date": "2025-05-25", "gold": 3357.7543, "silver": 33.4862, "ratio": 100.27277803990899}, {"date": "2025-05-26", "gold": 3345.5076, "silver": 33.4563, "ratio": 99.99634149622044}, {"date": "2025-05-27", "gold": 3345.4427, "silver": 33.4316, "ratio": 100.06827971141075}, {"date": "2025-05-28", "gold": 3310.6192, "silver": 33.2852, "ratio": 99.46219941595663}, {"date": "2025-05-29", "gold": 3261.4903, "silver": 32.9406, "ratio": 99.01125966132977}, {"date": "2025-05-30", "gold": 3317.9216, "silver": 33.2827, "ratio": 99.68907570599742}, {"date": "2025-05-31", "gold": 3289.5321, "silver": 32.9858, "ratio": 99.72570318136896}, {"date": "2025-06-01", "gold": 3289.5321, "silver": 32.9816, "ratio": 99.73840262449366}, {"date": "2025-06-02", "gold": 3312.2245, "silver": 33.0866, "ratio": 100.10773243548748}, {"date": "2025-06-03", "gold": 3384.7076, "silver": 34.6766, "ratio": 97.60782775704654}, {"date": "2025-06-04", "gold": 3356.7455, "silver": 34.5517, "ratio": 97.15138473649633}, {"date": "2025-06-05", "gold": 3376.1896, "silver": 34.5051, "ratio": 97.84610390927719}, {"date": "2025-06-06", "gold": 3363.6273, "silver": 35.7146, "ratio": 94.18073560952665}, {"date": "2025-06-07", "gold": 3310.514, "silver": 35.978, "ratio": 92.01495358274501}, {"date": "2025-06-08", "gold": 3310.5348, "silver": 35.9788, "ratio": 92.01348571936808}, {"date": "2025-06-09", "gold": 3316.4691, "silver": 36.0409, "ratio": 92.01959717987064}, {"date": "2025-06-10", "gold": 3321.447, "silver": 36.7616, "ratio": 90.35099125174095}, {"date": "2025-06-11", "gold": 3327.4936, "silver": 36.5677, "ratio": 90.99543039348933}, {"date": "2025-06-12", "gold": 3362.6681, "silver": 36.3106, "ratio": 92.60844216289458}, {"date": "2025-06-13", "gold": 3401.6174, "silver": 36.3574, "ratio": 93.56052412988828}, {"date": "2025-06-14", "gold": 3433.0615, "silver": 36.3141, "ratio": 94.537975607271}, {"date": "2025-06-15", "gold": 3432.9943, "silver": 36.3115, "ratio": 94.54289412445092}, {"date": "2025-06-16", "gold": 3441.3362, "silver": 36.2711, "ratio": 94.87818676577221}, {"date": "2025-06-17", "gold": 3400.0768, "silver": 36.2778, "ratio": 93.72334595813417}, {"date": "2025-06-18", "gold": 3384.9298, "silver": 37.1029, "ratio": 91.2308687461088}, {"date": "2025-06-19", "gold": 3376.7049, "silver": 36.7407, "ratio": 91.90638447280537}, {"date": "2025-06-20", "gold": 3367.3288, "silver": 36.3612, "ratio": 92.60774671903017}, {"date": "2025-06-21", "gold": 3368.075, "silver": 36.0056, "ratio": 93.5430877419068}, {"date": "2025-06-22", "gold": 3368.4403, "silver": 36.0063, "ratio": 93.55141461355373}, {"date": "2025-06-23", "gold": 3369.9365, "silver": 36.0637, "ratio": 93.4440032498052}, {"date": "2025-06-24", "gold": 3343.89, "silver": 35.8953, "ratio": 93.15676425604467}, {"date": "2025-06-25", "gold": 3326.815, "silver": 35.9373, "ratio": 92.57275866578736}, {"date": "2025-06-26", "gold": 3335.0698, "silver": 36.3465, "ratio": 91.75766029741517}, {"date": "2025-06-27", "gold": 3317.2161, "silver": 36.6478, "ratio": 90.51610465021093}, {"date": "2025-06-28", "gold": 3274.2345, "silver": 35.9963, "ratio": 90.96030703155603}, {"date": "2025-06-29", "gold": 3274.0673, "silver": 35.9917, "ratio": 90.96728690225802}, {"date": "2025-06-30", "gold": 3267.5553, "silver": 35.8118, "ratio": 91.24242009616943}, {"date": "2025-07-01", "gold": 3310.8702, "silver": 36.141, "ratio": 91.60981157134556}, {"date": "2025-07-02", "gold": 3343.4696, "silver": 36.1, "ratio": 92.61688642659279}, {"date": "2025-07-03", "gold": 3346.2946, "silver": 36.4035, "ratio": 91.92233164393534}, {"date": "2025-07-04", "gold": 3327.1028, "silver": 36.7318, "ratio": 90.5782673323932}, {"date": "2025-07-05", "gold": 3336.7435, "silver": 36.9261, "ratio": 90.36273800915883}, {"date": "2025-07-06", "gold": 3335.7918, "silver": 36.9343, "ratio": 90.31690867296794}, {"date": "2025-07-07", "gold": 3324.6085, "silver": 36.9444, "ratio": 89.98951126557745}, {"date": "2025-07-08", "gold": 3336.2448, "silver": 36.792, "ratio": 90.67853881278538}, {"date": "2025-07-09", "gold": 3304.6184, "silver": 36.5632, "ratio": 90.38099509889724}, {"date": "2025-07-10", "gold": 3318.9413, "silver": 36.3622, "ratio": 91.27449109239815}, {"date": "2025-07-11", "gold": 3326.5317, "silver": 37.1145, "ratio": 89.62889706179526}, {"date": "2025-07-12", "gold": 3355.6034, "silver": 38.421, "ratio": 87.33774238046901}, {"date": "2025-07-13", "gold": 3355.5133, "silver": 38.4087, "ratio": 87.36336559164981}, {"date": "2025-07-14", "gold": 3367.4285, "silver": 38.512, "ratio": 87.43842179061072}, {"date": "2025-07-15", "gold": 3346.6116, "silver": 38.2743, "ratio": 87.43756515468606}, {"date": "2025-07-16", "gold": 3329.6541, "silver": 37.7726, "ratio": 88.14998438021212}, {"date": "2025-07-17", "gold": 3344.6975, "silver": 37.8747, "ratio": 88.30954436602799}, {"date": "2025-07-18", "gold": 3340.203, "silver": 38.1268, "ratio": 87.60774573266049}, {"date": "2025-07-19", "gold": 3350.0737, "silver": 38.1757, "ratio": 87.75408702394455}, {"date": "2025-07-20", "gold": 3350.1522, "silver": 38.1781, "ratio": 87.7506266681684}, {"date": "2025-07-21", "gold": 3350.3015, "silver": 38.2153, "ratio": 87.66911420295013}, {"date": "2025-07-22", "gold": 3392.2476, "silver": 38.9525, "ratio": 87.08677491816957}, {"date": "2025-07-23", "gold": 3432.7786, "silver": 39.2633, "ratio": 87.42970152788992}, {"date": "2025-07-24", "gold": 3390.2373, "silver": 39.2809, "ratio": 86.30752604955588}, {"date": "2025-07-25", "gold": 3370.0534, "silver": 39.103, "ratio": 86.18401145692145}, {"date": "2025-07-26", "gold": 3336.8459, "silver": 38.1756, "ratio": 87.40781808275442}, {"date": "2025-07-27", "gold": 3337.1143, "silver": 38.1707, "ratio": 87.42607025807754}, {"date": "2025-07-28", "gold": 3333.58, "silver": 38.1674, "ratio": 87.34102925533308}, {"date": "2025-07-29", "gold": 3311.3076, "silver": 38.1172, "ratio": 86.87174294019499}, {"date": "2025-07-30", "gold": 3329.0178, "silver": 38.215, "ratio": 87.11285620829517}, {"date": "2025-07-31", "gold": 3284.6461, "silver": 37.053, "ratio": 88.64723774053384}, {"date": "2025-08-01", "gold": 3287.7465, "silver": 36.6804, "ratio": 89.63224228743417}, {"date": "2025-08-02", "gold": 3362.9814, "silver": 37.028, "ratio": 90.822658528681}, {"date": "2025-08-03", "gold": 3362.883, "silver": 37.0288, "ratio": 90.81803893185845}, {"date": "2025-08-04", "gold": 3356.9033, "silver": 36.9304, "ratio": 90.89810291792128}, {"date": "2025-08-05", "gold": 3376.7185, "silver": 37.4141, "ratio": 90.25256520937295}, {"date": "2025-08-06", "gold": 3382.4808, "silver": 37.7994, "ratio": 89.48503944507056}, {"date": "2025-08-07", "gold": 3369.0384, "silver": 37.8664, "ratio": 88.9717110683878}, {"date": "2025-08-08", "gold": 3400.5324, "silver": 38.2816, "ratio": 88.82942196773385}, {"date": "2025-08-09", "gold": 3398.1901, "silver": 38.3458, "ratio": 88.6196167507263}, {"date": "2025-08-10", "gold": 3398.3159, "silver": 38.3349, "ratio": 88.64809612128896}, {"date": "2025-08-11", "gold": 3387.76, "silver": 38.1207, "ratio": 88.86930198028894}, {"date": "2025-08-12", "gold": 3350.6697, "silver": 37.7068, "ratio": 88.86115236509065}, {"date": "2025-08-13", "gold": 3347.5784, "silver": 37.8979, "ratio": 88.33150121774557}, {"date": "2025-08-14", "gold": 3367.8266, "silver": 38.5342, "ratio": 87.39837858318066}, {"date": "2025-08-15", "gold": 3333.7389, "silver": 37.9937, "ratio": 87.74451817011769}, {"date": "2025-08-16", "gold": 3335.6405, "silver": 38.0023, "ratio": 87.77470047865525}, {"date": "2025-08-17", "gold": 3335.6316, "silver": 38.0085, "ratio": 87.76014838786062}, {"date": "2025-08-18", "gold": 3333.5945, "silver": 37.9393, "ratio": 87.866526266958}, {"date": "2025-08-19", "gold": 3337.6578, "silver": 38.0535, "ratio": 87.70961409594386}, {"date": "2025-08-20", "gold": 3314.9168, "silver": 37.37, "ratio": 88.70529301578807}, {"date": "2025-08-21", "gold": 3344.4704, "silver": 37.892, "ratio": 88.26323234455822}, {"date": "2025-08-22", "gold": 3337.2145, "silver": 38.086, "ratio": 87.62312923383921}, {"date": "2025-08-23", "gold": 3372.0035, "silver": 38.8895, "ratio": 86.70729888530323}, {"date": "2025-08-24", "gold": 3371.8591, "silver": 38.8865, "ratio": 86.71027477402184}, {"date": "2025-08-25", "gold": 3364.9436, "silver": 38.9022, "ratio": 86.49751427939808}, {"date": "2025-08-26", "gold": 3365.0908, "silver": 38.5836, "ratio": 87.2155734560798}, {"date": "2025-08-27", "gold": 3391.7103, "silver": 38.6692, "ratio": 87.71089911350637}, {"date": "2025-08-28", "gold": 3395.0589, "silver": 38.6424, "ratio": 87.85838612508539}, {"date": "2025-08-29", "gold": 3417.3722, "silver": 39.0212, "ratio": 87.57732207107931}, {"date": "2025-08-30", "gold": 3448.0024, "silver": 39.7363, "ratio": 86.7721051028908}, {"date": "2025-08-31", "gold": 3448.1867, "silver": 39.7192, "ratio": 86.81410249954682}, {"date": "2025-09-01", "gold": 3443.6898, "silver": 39.834, "ratio": 86.45101671938545}, {"date": "2025-09-02", "gold": 3481.2675, "silver": 40.6689, "ratio": 85.60023752793903}, {"date": "2025-09-03", "gold": 3530.2756, "silver": 40.9037, "ratio": 86.30699912232879}, {"date": "2025-09-04", "gold": 3556.485, "silver": 41.082, "ratio": 86.5703957937783}, {"date": "2025-09-05", "gold": 3551.9348, "silver": 40.7348, "ratio": 87.19656902697447}, {"date": "2025-09-06", "gold": 3586.7723, "silver": 41.0008, "ratio": 87.4805442820628}, {"date": "2025-09-07", "gold": 3586.6784, "silver": 41.0006, "ratio": 87.47868079979317}, {"date": "2025-09-08", "gold": 3588.743, "silver": 40.9005, "ratio": 87.74325497243309}, {"date": "2025-09-09", "gold": 3636.9151, "silver": 41.3179, "ratio": 88.02274800994242}, {"date": "2025-09-10", "gold": 3631.1005, "silver": 40.8545, "ratio": 88.87883831646452}, {"date": "2025-09-11", "gold": 3645.3046, "silver": 41.1919, "ratio": 88.49566540994711}, {"date": "2025-09-12", "gold": 3633.0463, "silver": 41.4754, "ratio": 87.5952082439229}, {"date": "2025-09-13", "gold": 3643.1877, "silver": 42.1785, "ratio": 86.37546854440058}, {"date": "2025-09-14", "gold": 3643.2288, "silver": 42.1864, "ratio": 86.36026776401873}, {"date": "2025-09-15", "gold": 3640.7908, "silver": 42.2091, "ratio": 86.2560632659782}, {"date": "2025-09-16", "gold": 3678.4626, "silver": 42.6364, "ratio": 86.27516863525062}, {"date": "2025-09-17", "gold": 3694.8689, "silver": 42.5896, "ratio": 86.75519140823113}, {"date": "2025-09-18", "gold": 3663.7163, "silver": 41.7656, "ratio": 87.72090667918096}, {"date": "2025-09-19", "gold": 3638.7546, "silver": 41.7165, "ratio": 87.22578835712487}, {"date": "2025-09-20", "gold": 3685.2325, "silver": 43.0713, "ratio": 85.56120897209975}, {"date": "2025-09-21", "gold": 3685.2583, "silver": 43.0832, "ratio": 85.53817497307536}, {"date": "2025-09-22", "gold": 3690.0274, "silver": 43.1543, "ratio": 85.5077570485444}, {"date": "2025-09-23", "gold": 3746.9111, "silver": 43.9798, "ratio": 85.19618324776374}, {"date": "2025-09-24", "gold": 3759.1088, "silver": 43.9298, "ratio": 85.57081525524815}, {"date": "2025-09-25", "gold": 3747.8829, "silver": 43.9382, "ratio": 85.298963089066}, {"date": "2025-09-26", "gold": 3745.3759, "silver": 44.9343, "ratio": 83.35226986956512}, {"date": "2025-09-27", "gold": 3759.8324, "silver": 46.0485, "ratio": 81.64940008903656}, {"date": "2025-09-28", "gold": 3759.7264, "silver": 46.0567, "ratio": 81.63256160341493}, {"date": "2025-09-29", "gold": 3774.1546, "silver": 46.4698, "ratio": 81.21736267425295}, {"date": "2025-09-30", "gold": 3836.5109, "silver": 46.9314, "ratio": 81.74720762645053}, {"date": "2025-10-01", "gold": 3865.0465, "silver": 46.7246, "ratio": 82.71973435834656}, {"date": "2025-10-02", "gold": 3858.6827, "silver": 47.1059, "ratio": 81.91506159525665}, {"date": "2025-10-03", "gold": 3860.5448, "silver": 46.9192, "ratio": 82.28070384831797}, {"date": "2025-10-04", "gold": 3886.4836, "silver": 47.9895, "ratio": 80.98612404796883}, {"date": "2025-10-05", "gold": 3886.7963, "silver": 47.9955, "ratio": 80.98251502745049}, {"date": "2025-10-06", "gold": 3904.3055, "silver": 48.1962, "ratio": 81.00857536486279}, {"date": "2025-10-07", "gold": 3971.6819, "silver": 48.5435, "ratio": 81.81696622616828}, {"date": "2025-10-08", "gold": 3996.8137, "silver": 47.9677, "ratio": 83.32302153324008}, {"date": "2025-10-09", "gold": 4018.1605, "silver": 48.8109, "ratio": 82.32096724297237}, {"date": "2025-10-10", "gold": 3989.0318, "silver": 49.4177, "ratio": 80.72070938145644}, {"date": "2025-10-11", "gold": 4017.3647, "silver": 50.1564, "ratio": 80.09675136174049}, {"date": "2025-10-12", "gold": 4017.1645, "silver": 50.0857, "ratio": 80.20581722926903}, {"date": "2025-10-13", "gold": 4032.6369, "silver": 50.4729, "ratio": 79.89707149777405}, {"date": "2025-10-14", "gold": 4124.2147, "silver": 52.4757, "ratio": 78.5928477371431}, {"date": "2025-10-15", "gold": 4169.309, "silver": 52.0212, "ratio": 80.14634418275627}, {"date": "2025-10-16", "gold": 4213.6577, "silver": 53.1201, "ratio": 79.32322604814372}, {"date": "2025-10-17", "gold": 4360.4106, "silver": 54.0892, "ratio": 80.61518010989255}, {"date": "2025-10-18", "gold": 4252.0189, "silver": 51.8942, "ratio": 81.93630309360199}, {"date": "2025-10-19", "gold": 4250.7356, "silver": 51.9305, "ratio": 81.85431682729802}, {"date": "2025-10-20", "gold": 4228.1778, "silver": 51.4662, "ratio": 82.15445865441785}, {"date": "2025-10-21", "gold": 4359.1485, "silver": 52.4572, "ratio": 83.09914558916603}, {"date": "2025-10-22", "gold": 4010.8952, "silver": 47.7013, "ratio": 84.08356166393787}, {"date": "2025-10-23", "gold": 4088.8039, "silver": 48.1959, "ratio": 84.8371728715513}, {"date": "2025-10-24", "gold": 4130.6287, "silver": 48.9261, "ratio": 84.42587289810552}, {"date": "2025-10-25", "gold": 4113.3119, "silver": 48.6137, "ratio": 84.6121957390612}, {"date": "2025-10-26", "gold": 4113.3271, "silver": 48.6142, "ratio": 84.611638163335}, {"date": "2025-10-27", "gold": 4069.7672, "silver": 48.1972, "ratio": 84.43990937232867}, {"date": "2025-10-28", "gold": 3989.0795, "silver": 46.8067, "ratio": 85.22454050381675}, {"date": "2025-10-29", "gold": 3964.5207, "silver": 47.1781, "ratio": 84.03307254849177}, {"date": "2025-10-30", "gold": 3957.8912, "silver": 47.8336, "ratio": 82.7429087503345}, {"date": "2025-10-31", "gold": 4030.3095, "silver": 49.0086, "ratio": 82.236780891517}, {"date": "2025-11-01", "gold": 4002.7283, "silver": 48.6785, "ratio": 82.22784802325462}, {"date": "2025-11-02", "gold": 4002.8164, "silver": 48.6758, "ratio": 82.23421905751934}, {"date": "2025-11-03", "gold": 3978.7677, "silver": 48.5032, "ratio": 82.03103506572762}, {"date": "2025-11-04", "gold": 3996.5901, "silver": 47.9823, "ratio": 83.29300804671722}, {"date": "2025-11-05", "gold": 3936.5476, "silver": 47.119, "ratio": 83.54480358241898}, {"date": "2025-11-06", "gold": 3974.9214, "silver": 48.0713, "ratio": 82.68803631272714}, {"date": "2025-11-07", "gold": 3985.0386, "silver": 48.148, "ratio": 82.76644097366453}, {"date": "2025-11-08", "gold": 4001.0659, "silver": 48.3261, "ratio": 82.79306420340149}, {"date": "2025-11-09", "gold": 4001.1123, "silver": 48.3147, "ratio": 82.81355984824494}, {"date": "2025-11-10", "gold": 4014.3924, "silver": 48.5819, "ratio": 82.63144092758827}, {"date": "2025-11-11", "gold": 4119.3406, "silver": 50.5362, "ratio": 81.51267012557336}, {"date": "2025-11-12", "gold": 4143.6882, "silver": 51.3181, "ratio": 80.74516008971493}, {"date": "2025-11-13", "gold": 4187.7432, "silver": 53.0687, "ratio": 78.91173516592643}, {"date": "2025-11-14", "gold": 4184.8411, "silver": 52.579, "ratio": 79.5914928013085}, {"date": "2025-11-15", "gold": 4082.0092, "silver": 50.5877, "ratio": 80.69173336601585}, {"date": "2025-11-16", "gold": 4082.9392, "silver": 50.5676, "ratio": 80.74219856192502}, {"date": "2025-11-17", "gold": 4085.7868, "silver": 50.6924, "ratio": 80.59959283837419}, {"date": "2025-11-18", "gold": 4038.0954, "silver": 49.9162, "ratio": 80.89749219692204}, {"date": "2025-11-19", "gold": 4073.962, "silver": 50.7945, "ratio": 80.20478595123488}, {"date": "2025-11-20", "gold": 4104.9858, "silver": 51.7549, "ratio": 79.31588699813932}, {"date": "2025-11-21", "gold": 4079.6295, "silver": 50.8077, "ratio": 80.29549654875147}, {"date": "2025-11-22", "gold": 4064.9217, "silver": 49.9913, "ratio": 81.31258238933574}, {"date": "2025-11-23", "gold": 4065.1415, "silver": 50.0016, "ratio": 81.30022839269144}, {"date": "2025-11-24", "gold": 4056.4282, "silver": 49.9476, "ratio": 81.21367593237713}, {"date": "2025-11-25", "gold": 4127.8818, "silver": 51.1426, "ratio": 80.71317844614862}, {"date": "2025-11-26", "gold": 4141.0148, "silver": 51.5122, "ratio": 80.38901075861641}, {"date": "2025-11-27", "gold": 4157.9073, "silver": 53.125, "ratio": 78.26649035294118}, {"date": "2025-11-28", "gold": 4178.3329, "silver": 53.7531, "ratio": 77.73194290189775}, {"date": "2025-11-29", "gold": 4216.8632, "silver": 56.3686, "ratio": 74.80872684437789}, {"date": "2025-11-30", "gold": 4222.7697, "silver": 56.3887, "ratio": 74.88680710851642}, {"date": "2025-12-01", "gold": 4230.258, "silver": 57.175, "ratio": 73.98789680804548}, {"date": "2025-12-02", "gold": 4202.9098, "silver": 56.8154, "ratio": 73.97483428788675}, {"date": "2025-12-03", "gold": 4216.5804, "silver": 58.2603, "ratio": 72.3748487391929}, {"date": "2025-12-04", "gold": 4212.2999, "silver": 58.5264, "ratio": 71.97264653216325}, {"date": "2025-12-05", "gold": 4196.7257, "silver": 56.9909, "ratio": 73.63852299226718}, {"date": "2025-12-06", "gold": 4197.7228, "silver": 58.3395, "ratio": 71.95335578810239}, {"date": "2025-12-07", "gold": 4197.7457, "silver": 58.3038, "ratio": 71.99780631794154}, {"date": "2025-12-08", "gold": 4204.9192, "silver": 58.1964, "ratio": 72.25394010626087}, {"date": "2025-12-09", "gold": 4196.4475, "silver": 58.1184, "ratio": 72.2051450143156}, {"date": "2025-12-10", "gold": 4214.2668, "silver": 60.9712, "ratio": 69.11897420421445}, {"date": "2025-12-11", "gold": 4242.5626, "silver": 62.6528, "ratio": 67.71545086572348}, {"date": "2025-12-12", "gold": 4274.3646, "silver": 63.3108, "ratio": 67.51398813472582}, {"date": "2025-12-13", "gold": 4299.9249, "silver": 61.9297, "ratio": 69.43235475062853}, {"date": "2025-12-14", "gold": 4299.6273, "silver": 61.9289, "ratio": 69.42844616972044}, {"date": "2025-12-15", "gold": 4310.8595, "silver": 61.9267, "ratio": 69.61229162865129}, {"date": "2025-12-16", "gold": 4304.7246, "silver": 63.5544, "ratio": 67.73291227672671}, {"date": "2025-12-17", "gold": 4317.7874, "silver": 64.2985, "ratio": 67.15222594617292}, {"date": "2025-12-18", "gold": 4330.1647, "silver": 66.1773, "ratio": 65.4327798202707}, {"date": "2025-12-19", "gold": 4326.1502, "silver": 65.3833, "ratio": 66.16598122150457}, {"date": "2025-12-20", "gold": 4338.8692, "silver": 67.1619, "ratio": 64.6031336218898}, {"date": "2025-12-21", "gold": 4338.9294, "silver": 67.1627, "ratio": 64.60326044069103}, {"date": "2025-12-22", "gold": 4365.8037, "silver": 67.9572, "ratio": 64.24343115961223}, {"date": "2025-12-23", "gold": 4484.2165, "silver": 69.6186, "ratio": 64.41118465467562}, {"date": "2025-12-24", "gold": 4512.7596, "silver": 71.8226, "ratio": 62.83202780183397}, {"date": "2025-12-25", "gold": 4479.5883, "silver": 71.853, "ratio": 62.343789403365214}, {"date": "2025-12-26", "gold": 4514.8256, "silver": 74.9641, "ratio": 60.2265030861439}, {"date": "2025-12-27", "gold": 4533.6999, "silver": 79.2926, "ratio": 57.17683491271569}, {"date": "2025-12-28", "gold": 4533.6012, "silver": 79.2867, "ratio": 57.17984479111882}, {"date": "2025-12-29", "gold": 4513.224, "silver": 78.3734, "ratio": 57.58617081816024}, {"date": "2025-12-30", "gold": 4333.7001, "silver": 72.6486, "ratio": 59.65290590596378}, {"date": "2025-12-31", "gold": 4354.1472, "silver": 75.2739, "ratio": 57.84404953111238}, {"date": "2026-01-01", "gold": 4318.5501, "silver": 71.5733, "ratio": 60.337445667588334}, {"date": "2026-01-02", "gold": 4350.4818, "silver": 72.548, "ratio": 59.966943265148586}, {"date": "2026-01-03", "gold": 4331.9073, "silver": 72.8143, "ratio": 59.49253512016183}, {"date": "2026-01-04", "gold": 4331.9091, "silver": 72.8181, "ratio": 59.48945523159764}, {"date": "2026-01-05", "gold": 4402.6971, "silver": 75.7057, "ratio": 58.15542422829458}, {"date": "2026-01-06", "gold": 4440.5328, "silver": 76.5014, "ratio": 58.04511812855712}, {"date": "2026-01-07", "gold": 4472.2279, "silver": 80.2892, "ratio": 55.70148787134509}, {"date": "2026-01-08", "gold": 4457.8179, "silver": 78.697, "ratio": 56.64533463791504}, {"date": "2026-01-09", "gold": 4458.8555, "silver": 75.8112, "ratio": 58.815260805791226}, {"date": "2026-01-10", "gold": 4509.5951, "silver": 79.9125, "ratio": 56.4316608790865}, {"date": "2026-01-11", "gold": 4509.6052, "silver": 79.9083, "ratio": 56.434753336011404}, {"date": "2026-01-12", "gold": 4581.5362, "silver": 83.4467, "ratio": 54.903743347549984}, {"date": "2026-01-13", "gold": 4594.6655, "silver": 84.2303, "ratio": 54.54884406205368}, {"date": "2026-01-14", "gold": 4615.7993, "silver": 88.9857, "ratio": 51.87124785218299}, {"date": "2026-01-15", "gold": 4613.9699, "silver": 91.7437, "ratio": 50.29195356193395}, {"date": "2026-01-16", "gold": 4602.7822, "silver": 91.7121, "ratio": 50.18729480624693}, {"date": "2026-01-17", "gold": 4596.4944, "silver": 90.1356, "ratio": 50.99532704059217}, {"date": "2026-01-18", "gold": 4596.3804, "silver": 90.1196, "ratio": 51.0031158593691}, {"date": "2026-01-19", "gold": 4666.4775, "silver": 93.668, "ratio": 49.81933531195285}, {"date": "2026-01-20", "gold": 4670.5379, "silver": 93.5519, "ratio": 49.92456486720206}, {"date": "2026-01-21", "gold": 4803.1662, "silver": 95.1323, "ratio": 50.48933117353412}, {"date": "2026-01-22", "gold": 4785.5133, "silver": 91.7517, "ratio": 52.15721670552153}, {"date": "2026-01-23", "gold": 4947.0517, "silver": 97.4755, "ratio": 50.75174479741063}, {"date": "2026-01-24", "gold": 4985.783, "silver": 103.1547, "ratio": 48.333066743444554}, {"date": "2026-01-25", "gold": 4985.5817, "silver": 103.1547, "ratio": 48.33111530545869}, {"date": "2026-01-26", "gold": 5057.8057, "silver": 107.6105, "ratio": 47.00104264918386}, {"date": "2026-01-27", "gold": 5063.6424, "silver": 109.7295, "ratio": 46.146591390646996}, {"date": "2026-01-28", "gold": 5185.9258, "silver": 113.5808, "ratio": 45.658472206570124}, {"date": "2026-01-29", "gold": 5477.7892, "silver": 117.3901, "ratio": 46.663127469863305}, {"date": "2026-01-30", "gold": 5335.0775, "silver": 114.8439, "ratio": 46.45503592267417}, {"date": "2026-01-31", "gold": 4890.3534, "silver": 85.3125, "ratio": 57.322823736263736}, {"date": "2026-02-01", "gold": 4892.332, "silver": 85.2144, "ratio": 57.41203364689537}, {"date": "2026-02-02", "gold": 4636.4663, "silver": 80.713, "ratio": 57.443860344678065}, {"date": "2026-02-03", "gold": 4822.6704, "silver": 83.5523, "ratio": 57.72037873284158}, {"date": "2026-02-04", "gold": 5040.9044, "silver": 86.9393, "ratio": 57.98188391210879}, {"date": "2026-02-05", "gold": 4979.8788, "silver": 88.5049, "ratio": 56.26670161765055}, {"date": "2026-02-06", "gold": 4758.2477, "silver": 70.9137, "ratio": 67.0991317615637}, {"date": "2026-02-07", "gold": 4954.1714, "silver": 78.3359, "ratio": 63.24266906999218}, {"date": "2026-02-08", "gold": 4953.0083, "silver": 76.9978, "ratio": 64.32662102034085}, {"date": "2026-02-09", "gold": 4967.895, "silver": 79.8398, "ratio": 62.2232896374991}, {"date": "2026-02-10", "gold": 5032.3783, "silver": 81.7728, "ratio": 61.54098061947249}, {"date": "2026-02-11", "gold": 5044.948, "silver": 81.6505, "ratio": 61.78710479421437}, {"date": "2026-02-12", "gold": 5049.8878, "silver": 82.3924, "ratio": 61.2906991421539}, {"date": "2026-02-13", "gold": 4952.2945, "silver": 76.5566, "ratio": 64.68801514173826}, {"date": "2026-02-14", "gold": 5042.3304, "silver": 77.4261, "ratio": 65.12442703429463}, {"date": "2026-02-15", "gold": 5042.4397, "silver": 77.4261, "ratio": 65.12583870296966}, {"date": "2026-02-16", "gold": 5021.6231, "silver": 76.9041, "ratio": 65.29720912149027}, {"date": "2026-02-17", "gold": 4946.8755, "silver": 74.3077, "ratio": 66.57285180405262}, {"date": "2026-02-18", "gold": 4888.2473, "silver": 72.8971, "ratio": 67.05681433143431}, {"date": "2026-02-19", "gold": 4963.8384, "silver": 76.896, "ratio": 64.55262172284644}, {"date": "2026-02-20", "gold": 5013.6471, "silver": 78.5784, "ratio": 63.80439281023793}, {"date": "2026-02-21", "gold": 5107.1767, "silver": 84.7465, "ratio": 60.26416076180137}, {"date": "2026-02-22", "gold": 5107.0306, "silver": 84.7465, "ratio": 60.26243679679987}, {"date": "2026-02-23", "gold": 5148.0767, "silver": 86.6073, "ratio": 59.44160249771093}, {"date": "2026-02-24", "gold": 5189.5563, "silver": 87.0091, "ratio": 59.643833805889265}, {"date": "2026-02-25", "gold": 5170.1764, "silver": 87.8289, "ratio": 58.8664596732966}, {"date": "2026-02-26", "gold": 5189.7556, "silver": 89.8985, "ratio": 57.72905665834247}, {"date": "2026-02-27", "gold": 5177.3072, "silver": 88.2282, "ratio": 58.680866208309816}, {"date": "2026-02-28", "gold": 5278.7887, "silver": 93.7752, "ratio": 56.291948190992926}, {"date": "2026-03-01", "gold": 5277.7829, "silver": 93.766, "ratio": 56.28674466224431}, {"date": "2026-03-02", "gold": 5336.1394, "silver": 94.4417, "ratio": 56.50194140935625}, {"date": "2026-03-03", "gold": 5363.1352, "silver": 90.2671, "ratio": 59.41406337414185}, {"date": "2026-03-04", "gold": 5160.7256, "silver": 83.8058, "ratio": 61.579575637962996}, {"date": "2026-03-05", "gold": 5180.9982, "silver": 84.9949, "ratio": 60.95657739464368}, {"date": "2026-03-06", "gold": 5082.68, "silver": 82.3529, "ratio": 61.718288002001145}, {"date": "2026-03-07", "gold": 5171.9198, "silver": 84.6514, "ratio": 61.096683575227345}, {"date": "2026-03-08", "gold": 5171.8743, "silver": 84.5764, "ratio": 61.15032444038763}, {"date": "2026-03-09", "gold": 5064.4451, "silver": 80.5947, "ratio": 62.838438507743064}, {"date": "2026-03-10", "gold": 5144.0885, "silver": 87.7448, "ratio": 58.62556527566306}, {"date": "2026-03-11", "gold": 5217.4938, "silver": 88.9971, "ratio": 58.625436109715935}, {"date": "2026-03-12", "gold": 5156.2286, "silver": 85.5261, "ratio": 60.28836343525544}, {"date": "2026-03-13", "gold": 5119.1587, "silver": 85.2778, "ratio": 60.02920689792654}, {"date": "2026-03-14", "gold": 5018.7878, "silver": 80.614, "ratio": 62.257024834396006}, {"date": "2026-03-15", "gold": 5019.5864, "silver": 80.5924, "ratio": 62.28361979541496}, {"date": "2026-03-16", "gold": 4999.745, "silver": 79.346, "ratio": 63.01193506919063}, {"date": "2026-03-17", "gold": 5010.7079, "silver": 80.7081, "ratio": 62.08432486949885}, {"date": "2026-03-18", "gold": 5011.9987, "silver": 79.925, "ratio": 62.708773224898344}, {"date": "2026-03-19", "gold": 4838.9103, "silver": 75.7284, "ratio": 63.89822444419795}, {"date": "2026-03-20", "gold": 4656.534, "silver": 73.0514, "ratio": 63.743254749395625}, {"date": "2026-03-21", "gold": 4492.6173, "silver": 67.9373, "ratio": 66.12887618436412}, {"date": "2026-03-22", "gold": 4493.7781, "silver": 67.9105, "ratio": 66.17206617533373}, {"date": "2026-03-23", "gold": 4410.4701, "silver": 67.1545, "ratio": 65.67646397486392}, {"date": "2026-03-24", "gold": 4347.8979, "silver": 67.1544, "ratio": 64.74479557556914}, {"date": "2026-03-25", "gold": 4572.9714, "silver": 74.2253, "ratio": 61.60933536139295}, {"date": "2026-03-26", "gold": 4538.628, "silver": 71.6662, "ratio": 63.33010540533751}, {"date": "2026-03-27", "gold": 4397.052, "silver": 68.1736, "ratio": 64.49787014328128}, {"date": "2026-03-28", "gold": 4493.869, "silver": 69.7456, "ratio": 64.43229393682182}, {"date": "2026-03-29", "gold": 4493.8569, "silver": 69.7456, "ratio": 64.43212044917529}, {"date": "2026-03-30", "gold": 4425.9558, "silver": 67.9852, "ratio": 65.1017544995087}, {"date": "2026-03-31", "gold": 4518.4956, "silver": 69.8772, "ratio": 64.6633751781697}, {"date": "2026-04-01", "gold": 4697.886, "silver": 74.9034, "ratio": 62.71926240998406}, {"date": "2026-04-02", "gold": 4791.9916, "silver": 75.7337, "ratio": 63.27423062652426}, {"date": "2026-04-03", "gold": 4676.7172, "silver": 73.0029, "ratio": 64.06207424636555}, {"date": "2026-04-04", "gold": 4676.7457, "silver": 73.0069, "ratio": 64.05895470154191}, {"date": "2026-04-05", "gold": 4676.6429, "silver": 73.0069, "ratio": 64.05754661545689}, {"date": "2026-04-06", "gold": 4624.7373, "silver": 72.4308, "ratio": 63.850424128961706}, {"date": "2026-04-07", "gold": 4659.8692, "silver": 72.9511, "ratio": 63.87661323818284}, {"date": "2026-04-08", "gold": 4840.0977, "silver": 76.694, "ratio": 63.109209325370955}, {"date": "2026-04-09", "gold": 4700.0742, "silver": 73.5461, "ratio": 63.90650489964798}, {"date": "2026-04-10", "gold": 4752.9263, "silver": 75.1249, "ratio": 63.26699003925463}, {"date": "2026-04-11", "gold": 4749.1273, "silver": 75.951, "ratio": 62.52883174678412}, {"date": "2026-04-12", "gold": 4749.0462, "silver": 75.9367, "ratio": 62.53953885275499}, {"date": "2026-04-13", "gold": 4670.6099, "silver": 73.8637, "ratio": 63.23281801480295}, {"date": "2026-04-14", "gold": 4757.8855, "silver": 75.5354, "ratio": 62.98881716387284}, {"date": "2026-04-15", "gold": 4832.475, "silver": 79.3516, "ratio": 60.89952817586539}, {"date": "2026-04-16", "gold": 4830.3065, "silver": 79.9055, "ratio": 60.45023809374823}, {"date": "2026-04-17", "gold": 4789.8042, "silver": 78.5754, "ratio": 60.958063210623166}, {"date": "2026-04-18", "gold": 4830.4582, "silver": 80.8143, "ratio": 59.772319997822166}, {"date": "2026-04-19", "gold": 4831.1746, "silver": 80.8143, "ratio": 59.78118476556748}, {"date": "2026-04-20", "gold": 4751.368, "silver": 79.1466, "ratio": 60.032496658100285}, {"date": "2026-04-21", "gold": 4829.3827, "silver": 79.9767, "ratio": 60.384870843633216}, {"date": "2026-04-22", "gold": 4745.1634, "silver": 77.4819, "ratio": 61.2422178599131}, {"date": "2026-04-23", "gold": 4706.343, "silver": 76.874, "ratio": 61.22151832869371}, {"date": "2026-04-24", "gold": 4696.3901, "silver": 75.5477, "ratio": 62.16456755136158}, {"date": "2026-04-25", "gold": 4709.4527, "silver": 75.6942, "ratio": 62.21682374607302}, {"date": "2026-04-26", "gold": 4709.3507, "silver": 75.6885, "ratio": 62.22016158333168}, {"date": "2026-04-27", "gold": 4679.028, "silver": 75.0541, "ratio": 62.342070586416995}, {"date": "2026-04-28", "gold": 4699.5175, "silver": 76.1061, "ratio": 61.74955095583665}, {"date": "2026-04-29", "gold": 4609.5461, "silver": 73.601, "ratio": 62.628851510169696}, {"date": "2026-04-30", "gold": 4560.708, "silver": 71.9947, "ratio": 63.34782977080257}, {"date": "2026-05-01", "gold": 4622.7747, "silver": 74.3506, "ratio": 62.17535164477489}, {"date": "2026-05-02", "gold": 4614.3531, "silver": 75.357, "ratio": 61.23323778812851}, {"date": "2026-05-03", "gold": 4614.4745, "silver": 75.3535, "ratio": 61.237693006960534}, {"date": "2026-05-04", "gold": 4611.5294, "silver": 75.5776, "ratio": 61.01714529172665}, {"date": "2026-05-05", "gold": 4527.5747, "silver": 72.8501, "ratio": 62.14918991188757}, {"date": "2026-05-06", "gold": 4590.0658, "silver": 73.6941, "ratio": 62.28539055365355}, {"date": "2026-05-07", "gold": 4698.5879, "silver": 77.4371, "ratio": 60.67618622081664}, {"date": "2026-05-08", "gold": 4704.1446, "silver": 79.2761, "ratio": 59.338749005059526}, {"date": "2026-05-09", "gold": 4715.2841, "silver": 80.3471, "ratio": 58.68642552126959}, {"date": "2026-05-10", "gold": 4715.0328, "silver": 80.344, "ratio": 58.68556208304292}, {"date": "2026-05-11", "gold": 4681.7356, "silver": 79.9084, "ratio": 58.588779152129185}, {"date": "2026-05-12", "gold": 4767.1554, "silver": 86.7722, "ratio": 54.938740748765156}, {"date": "2026-05-13", "gold": 4722.3405, "silver": 87.3263, "ratio": 54.07695619761744}, {"date": "2026-05-14", "gold": 4696.4806, "silver": 87.6429, "ratio": 53.586549509429744}, {"date": "2026-05-15", "gold": 4648.067, "silver": 83.2414, "ratio": 55.83840492831692}, {"date": "2026-05-16", "gold": 4540.1549, "silver": 75.9835, "ratio": 59.75185270486356}, {"date": "2026-05-17", "gold": 4540.4188, "silver": 75.9747, "ratio": 59.76224716912341}, {"date": "2026-05-18", "gold": 4526.9722, "silver": 76.3821, "ratio": 59.26744878708494}, {"date": "2026-05-19", "gold": 4580.5646, "silver": 78.4771, "ratio": 58.36816854853199}, {"date": "2026-05-20", "gold": 4488.0443, "silver": 74.0996, "ratio": 60.5677264114786}, {"date": "2026-05-21", "gold": 4544.3577, "silver": 75.6517, "ratio": 60.06947233175195}, {"date": "2026-05-22", "gold": 4532.5081, "silver": 76.438, "ratio": 59.296529213218555}, {"date": "2026-05-23", "gold": 4509.5768, "silver": 75.5169, "ratio": 59.7161271185655}, {"date": "2026-05-24", "gold": 4509.5991, "silver": 75.5148, "ratio": 59.7180830777543}, {"date": "2026-05-25", "gold": 4572.6556, "silver": 78.4501, "ratio": 58.28744131619972}, {"date": "2026-05-26", "gold": 4551.593, "silver": 77.443, "ratio": 58.773459189339256}, {"date": "2026-05-27", "gold": 4521.7564, "silver": 77.4254, "ratio": 58.40145998599943}, {"date": "2026-05-28", "gold": 4447.6151, "silver": 74.4929, "ratio": 59.70522157145177}, {"date": "2026-05-29", "gold": 4497.3169, "silver": 75.9894, "ratio": 59.183476905989515}, {"date": "2026-05-30", "gold": 4539.7839, "silver": 75.2859, "ratio": 60.30058616553698}, {"date": "2026-05-31", "gold": 4539.2482, "silver": 75.2859, "ratio": 60.29347062331725}, {"date": "2026-06-01", "gold": 4540.5343, "silver": 75.6277, "ratio": 60.03797947048502}, {"date": "2026-06-02", "gold": 4480.3329, "silver": 74.9111, "ratio": 59.80866520448905}, {"date": "2026-06-03", "gold": 4475.6286, "silver": 74.7732, "ratio": 59.856052703375006}, {"date": "2026-06-04", "gold": 4455.3571, "silver": 73.142, "ratio": 60.91379918514671}, {"date": "2026-06-05", "gold": 4455.8038, "silver": 73.5104, "ratio": 60.61460419205989}, {"date": "2026-06-06", "gold": 4328.7401, "silver": 67.7963, "ratio": 63.849208585129276}, {"date": "2026-06-07", "gold": 4328.9987, "silver": 67.7541, "ratio": 63.892793203658535}, {"date": "2026-06-08", "gold": 4344.0241, "silver": 68.1012, "ratio": 63.78777613316651}, {"date": "2026-06-09", "gold": 4319.5313, "silver": 67.8892, "ratio": 63.62619238406108}, {"date": "2026-06-10", "gold": 4218.7578, "silver": 64.8509, "ratio": 65.0531881593008}, {"date": "2026-06-11", "gold": 4048.2716, "silver": 62.3725, "ratio": 64.90475129263697}, {"date": "2026-06-12", "gold": 4217.1068, "silver": 67.3837, "ratio": 62.58348532360199}, {"date": "2026-06-13", "gold": 4219.1049, "silver": 67.9177, "ratio": 62.1208447871468}, {"date": "2026-06-14", "gold": 4216.4969, "silver": 68.0167, "ratio": 61.99208282671756}, {"date": "2026-06-15", "gold": 4299.8916, "silver": 70.4308, "ratio": 61.05129573993196}, {"date": "2026-06-16", "gold": 4315.1324, "silver": 69.879, "ratio": 61.75149043346356}, {"date": "2026-06-17", "gold": 4338.5378, "silver": 70.2376, "ratio": 61.76944827272003}, {"date": "2026-06-18", "gold": 4296.4443, "silver": 68.6448, "ratio": 62.589508600797146}, {"date": "2026-06-19", "gold": 4193.2343, "silver": 65.3517, "ratio": 64.16411967860057}, {"date": "2026-06-20", "gold": 4155.6835, "silver": 64.8414, "ratio": 64.08997183897942}, {"date": "2026-06-21", "gold": 4155.6006, "silver": 64.8524, "ratio": 64.07782287162848}, {"date": "2026-06-22", "gold": 4155.9892, "silver": 64.8415, "ratio": 64.09458757123139}, {"date": "2026-06-23", "gold": 4184.0987, "silver": 65.0769, "ratio": 64.2946836742377}, {"date": "2026-06-24", "gold": 4108.4685, "silver": 61.7003, "ratio": 66.58749633308103}, {"date": "2026-06-25", "gold": 4009.9945, "silver": 57.6545, "ratio": 69.55215117640427}, {"date": "2026-06-26", "gold": 4016.153, "silver": 57.4968, "ratio": 69.85002643625384}, {"date": "2026-06-27", "gold": 4089.0045, "silver": 59.1553, "ratio": 69.12321465701298}, {"date": "2026-06-28", "gold": 4089.2888, "silver": 59.1713, "ratio": 69.10932833992155}, {"date": "2026-06-29", "gold": 4059.6311, "silver": 58.58, "ratio": 69.30063332195289}, {"date": "2026-06-30", "gold": 4012.1762, "silver": 58.305, "ratio": 68.81358717091159}, {"date": "2026-07-01", "gold": 4008.9335, "silver": 58.547, "ratio": 68.47376466770288}, {"date": "2026-07-02", "gold": 4042.6254, "silver": 59.2744, "ratio": 68.20187804515946}, {"date": "2026-07-03", "gold": 4130.3744, "silver": 61.1293, "ratio": 67.56783408283752}, {"date": "2026-07-04", "gold": 4175.3497, "silver": 62.3843, "ratio": 66.92949508129449}, {"date": "2026-07-05", "gold": 4175.1614, "silver": 62.3503, "ratio": 66.9629721107998}, {"date": "2026-07-06", "gold": 4176.3855, "silver": 62.6176, "ratio": 66.69667154282502}, {"date": "2026-07-07", "gold": 4154.2645, "silver": 61.808, "ratio": 67.2124077789283}, {"date": "2026-07-08", "gold": 4103.1297, "silver": 59.8664, "ratio": 68.53810651717826}, {"date": "2026-07-09", "gold": 4084.6937, "silver": 58.5331, "ratio": 69.78433911752495}, {"date": "2026-07-10", "gold": 4121.9232, "silver": 59.8895, "ratio": 68.82547358051077}, {"date": "2026-07-11", "gold": 4119.7784, "silver": 59.8632, "ratio": 68.81988266581139}, {"date": "2026-07-12", "gold": 4116.5629, "silver": 59.8629, "ratio": 68.76651314921261}, {"date": "2026-07-13", "gold": 4086.762, "silver": 59.2547, "ratio": 68.96941508437305}, {"date": "2026-07-14", "gold": 3994.0824, "silver": 57.3363, "ratio": 69.66062337472071}, {"date": "2026-07-15", "gold": 4052.5502, "silver": 58.7805, "ratio": 68.94378577929756}, {"date": "2026-07-16", "gold": 4055.8441, "silver": 57.7158, "ratio": 70.27268269693913}, {"date": "2026-07-17", "gold": 3984.5447, "silver": 55.4807, "ratio": 71.81857294518635}, {"date": "2026-07-18", "gold": 4017.9942, "silver": 55.9098, "ratio": 71.86565146003026}, {"date": "2026-07-19", "gold": 4016.6111, "silver": 55.901, "ratio": 71.85222267937961}, {"date": "2026-07-20", "gold": 3995.1627, "silver": 56.0813, "ratio": 71.23876764625642}, {"date": "2026-07-21", "gold": 4011.3199, "silver": 56.3946, "ratio": 71.12950353402631}, {"date": "2026-07-22", "gold": 4091.1542, "silver": 58.987, "ratio": 69.35687863427535}, {"date": "2026-07-23", "gold": 4126.9414, "silver": 59.6517, "ratio": 69.1839696102542}, {"date": "2026-07-24", "gold": 4043.7894, "silver": 57.4154, "ratio": 70.43039672283047}, {"date": "2026-07-25", "gold": 4052.6586, "silver": 58.1748, "ratio": 69.6634728439118}, {"date": "2026-07-26", "gold": 4052.7194, "silver": 58.1781, "ratio": 69.66056643307361}, {"date": "2026-07-27", "gold": 4115.3263, "silver": 60.0029, "ratio": 68.58545670292602}, {"date": "2026-07-28", "gold": 4066.454, "silver": 58.1319, "ratio": 69.95219492223718}, {"date": "2026-07-29", "gold": 4021.2644, "silver": 57.2006, "ratio": 70.30108775082779}, {"date": "2026-07-30", "gold": 4081.7026, "silver": 58.0818, "ratio": 70.27507067618428}, {"date": "2026-07-31", "gold": 4101.4031, "silver": 59.1144, "ratio": 69.3807786258509}, {"date": "2026-08-01", "gold": 4042.8722, "silver": 57.6006, "ratio": 70.18802234698944}, {"date": "2026-08-02", "gold": 4042.967, "silver": 57.584, "ratio": 70.2099020561267}, {"date": "2026-08-03", "gold": 4071.1076, "silver": 58.1556, "ratio": 70.00370729560008}, {"date": "2026-08-04", "gold": 4064.9085, "silver": 58.4525, "ratio": 69.54208117702407}, {"date": "2026-08-05", "gold": 4072.9597, "silver": 59.4454, "ratio": 68.51597768708764}, {"date": "2026-08-06", "gold": 4265.8094, "silver": 62.1391, "ratio": 68.6493592601116}, {"date": "2026-08-07", "gold": 4244.711, "silver": 61.4993, "ratio": 69.02047665583186}, {"date": "2026-08-08", "gold": 4341.9267, "silver": 63.5348, "ratio": 68.33934631099807}, {"date": "2026-08-09", "gold": 4341.9324, "silver": 63.4828, "ratio": 68.39541419093045}, {"date": "2026-08-10", "gold": 4343.8524, "silver": 63.9409, "ratio": 67.93542787167524}, {"date": "2026-08-11", "gold": 4405.3368, "silver": 65.9978, "ratio": 66.74975226446942}, {"date": "2026-08-12", "gold": 4375.7797, "silver": 64.8912, "ratio": 67.43255942254112}, {"date": "2026-08-13", "gold": 4420.6984, "silver": 65.6371, "ratio": 67.3506050693891}, {"date": "2026-08-14", "gold": 4386.5189988911, "silver": 64.8981736947, "ratio": 67.5907926088424}, {"date": "2026-08-15", "gold": 4376.3446318881, "silver": 64.6936241289, "ratio": 67.64723248721344}, {"date": "2026-08-16", "gold": 4376.5399950107, "silver": 64.6936241289, "ratio": 67.65025230756254}, {"date": "2026-08-17", "gold": 4427.6508567062, "silver": 66.3431702917, "ratio": 66.73860831851339}, {"date": "2026-08-18", "gold": 4361.1199181505, "silver": 63.8184753414, "ratio": 68.3363225902919}];
+const MONTHLY = [{"month": "2025-01", "gold_avg": 2700.1739967741933, "silver_avg": 30.233800000000002, "ratio_avg": 89.31502396640252, "days": 31}, {"month": "2025-02", "gold_avg": 2887.603339285715, "silver_avg": 32.072696428571426, "ratio_avg": 90.03615704436643, "days": 28}, {"month": "2025-03", "gold_avg": 2974.5410709677417, "silver_avg": 33.057003225806454, "ratio_avg": 90.00105412484102, "days": 31}, {"month": "2025-04", "gold_avg": 3223.1884, "silver_avg": 32.16703333333333, "ratio_avg": 100.26421817466571, "days": 30}, {"month": "2025-05", "gold_avg": 3286.2593806451614, "silver_avg": 32.76222258064517, "ratio_avg": 100.31020942864285, "days": 31}, {"month": "2025-06", "gold_avg": 3350.516756666667, "silver_avg": 35.85309333333333, "ratio_avg": 93.51116071302015, "days": 30}, {"month": "2025-07", "gold_avg": 3342.557567741936, "silver_avg": 37.72486451612902, "ratio_avg": 88.64491428119203, "days": 31}, {"month": "2025-08", "gold_avg": 3367.6360483870976, "silver_avg": 38.14079999999999, "ratio_avg": 88.31446663469076, "days": 31}, {"month": "2025-09", "gold_avg": 3655.5081266666666, "silver_avg": 42.59481333333334, "ratio_avg": 85.90203057758917, "days": 30}, {"month": "2025-10", "gold_avg": 4055.836164516129, "silver_avg": 49.38436774193548, "ratio_avg": 82.16914497934592, "days": 31}, {"month": "2025-11", "gold_avg": 4076.942093333333, "silver_avg": 50.57514999999999, "ratio_avg": 80.70514479373509, "days": 30}, {"month": "2025-12", "gold_avg": 4325.142138709677, "silver_avg": 65.42822580645161, "ratio_avg": 66.657017346187, "days": 31}, {"month": "2026-01", "gold_avg": 4698.081064516128, "silver_avg": 89.78415483870968, "ratio_avg": 52.979690773585574, "days": 31}, {"month": "2026-02", "gold_avg": 5013.2840214285725, "silver_avg": 81.80925357142856, "ratio_avg": 61.490638912914925, "days": 28}, {"month": "2026-03", "gold_avg": 4877.049429032258, "silver_avg": 78.66249677419357, "ratio_avg": 62.25443298687354, "days": 31}, {"month": "2026-04", "gold_avg": 4727.827523333334, "silver_avg": 75.94380333333334, "ratio_avg": 62.296136988248826, "days": 30}, {"month": "2026-05", "gold_avg": 4592.637622580644, "silver_avg": 77.67385161290322, "ratio_avg": 59.22506879625114, "days": 31}, {"month": "2026-06", "gold_avg": 4237.600596666667, "silver_avg": 66.34219999999999, "ratio_avg": 64.10869298560345, "days": 30}, {"month": "2026-07", "gold_avg": 4076.692483870967, "silver_avg": 58.836106451612906, "ratio_avg": 69.33291730523763, "days": 31}, {"month": "2026-08", "gold_avg": 4275.724233369256, "silver_avg": 62.60045375475556, "ratio_avg": 68.34976888451102, "days": 18}];
+const PREV_CLOSE = { gold: 4427.6508567062, silver: 66.3431702917, ratio: 66.73860831851339, date: "2026-08-17" };
+const DAILY_BY_DATE = {};
+DAILY.forEach(d => { DAILY_BY_DATE[d.date] = d; });
+
+function fmt(n, decimals) {
+  if (n === null || n === undefined || isNaN(n)) return '—';
+  return Number(n).toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+}
+function fmtMoney(n) { return '$' + fmt(n, 2); }
+function fmtPct(n) {
+  if (n === null || n === undefined || isNaN(n)) return '—';
+  const sign = n >= 0 ? '+' : '';
+  return `${sign}${n.toFixed(2)}%`;
+}
+// Same green/positive (#1a7f37) and red/negative (#c0392b) rule used by the
+// "vs. Yesterday" price-card change boxes, applied to the table Δ% cells.
+function fmtPctHtml(n) {
+  if (n === null || n === undefined || isNaN(n)) return '—';
+  const sign = n >= 0 ? '+' : '';
+  const color = n >= 0 ? '#1a7f37' : '#c0392b';
+  return `<span style="color:${color}; font-weight:600;">${sign}${n.toFixed(2)}%</span>`;
+}
+
+// ---------- Charts ----------
+// Both charts share one linear "days since epoch" x-axis (same min/max, same
+// month tick positions) instead of separate category axes, so a given month
+// lands at the exact same horizontal pixel in both charts and they read as
+// vertically aligned when stacked.
+function epochDay(isoDateOrMonth) {
+  const iso = isoDateOrMonth.length === 7 ? isoDateOrMonth + '-01' : isoDateOrMonth;
+  return Math.floor(Date.parse(iso + 'T00:00:00Z') / 86400000);
+}
+
+// Recomputed by buildCharts() every time the Date Range filter is applied,
+// since a filtered sub-range has its own min/max and its own set of months.
+let dailyMinX = epochDay(DAILY[0].date);
+let dailyMaxX = epochDay(DAILY[DAILY.length - 1].date);
+let MONTH_TICKS = [];
+function computeMonthTicks(dailyArr) {
+  const ticks = [];
+  const seen = new Set();
+  dailyArr.forEach(d => {
+    const month = d.date.slice(0, 7);
+    if (!seen.has(month)) {
+      seen.add(month);
+      ticks.push({ value: epochDay(month) });
+    }
+  });
+  return ticks;
+}
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function fmtDateMDY(epoch) {
+  const d = new Date(epoch * 86400000);
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  return `${MONTH_ABBR[d.getUTCMonth()]}-${dd}-${d.getUTCFullYear()}`;
+}
+function fmtMonthMY(epoch) {
+  const d = new Date(epoch * 86400000);
+  return `${MONTH_ABBR[d.getUTCMonth()]}-${d.getUTCFullYear()}`;
+}
+function monthTickOptions(formatFn) {
+  return {
+    // Every chart now sits in a three-across (Gold | Silver | Ratio) row, so
+    // each chart only gets roughly a third of the page width. With ~20
+    // months of history that's not enough room for horizontal labels
+    // without them overlapping — rotate them fully vertical (90°) and use a
+    // smaller font instead of thinning out the one-tick-per-month rule.
+    autoSkip: false, maxRotation: 90, minRotation: 90,
+    font: { size: 10 },
+    callback: function (value) {
+      const hit = MONTH_TICKS.find(t => t.value === value);
+      return hit ? formatFn(hit.value) : null;
+    }
+  };
+}
+function forceMonthTicks(scale) {
+  scale.ticks = MONTH_TICKS.map(t => ({ value: t.value }));
+}
+function tooltipTitle(formatFn) {
+  return { title: (items) => (items.length ? formatFn(items[0].parsed.x) : '') };
+}
+
+// ---------- Charts (rebuildable) ----------
+// Chart instances are (re)created by buildCharts() — once on page load with
+// the full DAILY/MONTHLY history, and again every time the Date Range
+// filter's "Filter" button is clicked, scoped to the selected sub-range.
+// Existing instances are destroyed first so a filter click doesn't leak
+// canvases or leave a stale chart underneath the new one.
+let dailyGoldChartInst, dailySilverChartInst, dailyRatioChartInst;
+let monthlyGoldChartInst, monthlySilverChartInst, monthlyRatioChartInst;
+
+function buildCharts(dailyArr, monthlyArr) {
+  dailyMinX = epochDay(dailyArr[0].date);
+  dailyMaxX = epochDay(dailyArr[dailyArr.length - 1].date);
+  MONTH_TICKS = computeMonthTicks(dailyArr);
+
+  [dailyGoldChartInst, dailySilverChartInst, dailyRatioChartInst,
+   monthlyGoldChartInst, monthlySilverChartInst, monthlyRatioChartInst].forEach(c => { if (c) c.destroy(); });
+
+  dailyGoldChartInst = new Chart(document.getElementById('dailyGoldChart'), {
+    type: 'line',
+    data: {
+      datasets: [
+        {
+          label: 'Gold ($/oz)', data: dailyArr.map(d => ({ x: epochDay(d.date), y: d.gold })),
+          borderColor: '#b8891f', backgroundColor: '#b8891f', pointRadius: 0, borderWidth: 1.5, tension: 0.15
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: { type: 'linear', min: dailyMinX, max: dailyMaxX, ticks: monthTickOptions(fmtDateMDY), afterBuildTicks: forceMonthTicks },
+        y: { type: 'linear', title: { display: true, text: 'Gold ($/oz)' } }
+      },
+      plugins: { legend: { display: false }, tooltip: { callbacks: tooltipTitle(fmtDateMDY) } }
+    }
+  });
+
+  dailySilverChartInst = new Chart(document.getElementById('dailySilverChart'), {
+    type: 'line',
+    data: {
+      datasets: [
+        {
+          label: 'Silver ($/oz)', data: dailyArr.map(d => ({ x: epochDay(d.date), y: d.silver })),
+          borderColor: '#6b7680', backgroundColor: '#6b7680', pointRadius: 0, borderWidth: 1.5, tension: 0.15
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: { type: 'linear', min: dailyMinX, max: dailyMaxX, ticks: monthTickOptions(fmtDateMDY), afterBuildTicks: forceMonthTicks },
+        y: { type: 'linear', title: { display: true, text: 'Silver ($/oz)' } }
+      },
+      plugins: { legend: { display: false }, tooltip: { callbacks: tooltipTitle(fmtDateMDY) } }
+    }
+  });
+
+  dailyRatioChartInst = new Chart(document.getElementById('dailyRatioChart'), {
+    type: 'line',
+    data: {
+      datasets: [
+        {
+          label: 'Gold/Silver Ratio', data: dailyArr.map(d => ({ x: epochDay(d.date), y: d.ratio })),
+          borderColor: '#7a4fae', backgroundColor: '#7a4fae', pointRadius: 0, borderWidth: 1.5, tension: 0.15
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: { type: 'linear', min: dailyMinX, max: dailyMaxX, ticks: monthTickOptions(fmtDateMDY), afterBuildTicks: forceMonthTicks },
+        y: { type: 'linear', title: { display: true, text: 'Gold/Silver Ratio' } }
+      },
+      plugins: { legend: { display: false }, tooltip: { callbacks: tooltipTitle(fmtDateMDY) } }
+    }
+  });
+
+  monthlyGoldChartInst = new Chart(document.getElementById('monthlyGoldChart'), {
+    type: 'line',
+    data: {
+      datasets: [
+        {
+          label: 'Gold Avg ($/oz)', data: monthlyArr.map(m => ({ x: epochDay(m.month), y: m.gold_avg })),
+          borderColor: '#b8891f', backgroundColor: '#b8891f', pointRadius: 2, borderWidth: 2, tension: 0.15
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: { type: 'linear', min: dailyMinX, max: dailyMaxX, ticks: monthTickOptions(fmtMonthMY), afterBuildTicks: forceMonthTicks },
+        y: { type: 'linear', title: { display: true, text: 'Gold Avg ($/oz)' } }
+      },
+      plugins: { legend: { display: false }, tooltip: { callbacks: tooltipTitle(fmtMonthMY) } }
+    }
+  });
+
+  monthlySilverChartInst = new Chart(document.getElementById('monthlySilverChart'), {
+    type: 'line',
+    data: {
+      datasets: [
+        {
+          label: 'Silver Avg ($/oz)', data: monthlyArr.map(m => ({ x: epochDay(m.month), y: m.silver_avg })),
+          borderColor: '#4a5560', backgroundColor: '#4a5560', pointRadius: 2, borderWidth: 2, tension: 0.15
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: { type: 'linear', min: dailyMinX, max: dailyMaxX, ticks: monthTickOptions(fmtMonthMY), afterBuildTicks: forceMonthTicks },
+        y: { type: 'linear', title: { display: true, text: 'Silver Avg ($/oz)' } }
+      },
+      plugins: { legend: { display: false }, tooltip: { callbacks: tooltipTitle(fmtMonthMY) } }
+    }
+  });
+
+  monthlyRatioChartInst = new Chart(document.getElementById('monthlyRatioChart'), {
+    type: 'line',
+    data: {
+      datasets: [
+        {
+          label: 'Gold/Silver Ratio (Monthly Avg)', data: monthlyArr.map(m => ({ x: epochDay(m.month), y: m.ratio_avg })),
+          borderColor: '#7a4fae', backgroundColor: '#7a4fae', pointRadius: 2, borderWidth: 2, tension: 0.15
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: { type: 'linear', min: dailyMinX, max: dailyMaxX, ticks: monthTickOptions(fmtMonthMY), afterBuildTicks: forceMonthTicks },
+        y: { type: 'linear', title: { display: true, text: 'Gold/Silver Ratio' } }
+      },
+      plugins: { legend: { display: false }, tooltip: { callbacks: tooltipTitle(fmtMonthMY) } }
+    }
+  });
+}
+
+// ---------- Tables (rebuildable) ----------
+// Day-over-day / month-over-month % change columns compare each row to the
+// immediately preceding row in the ascending daily/monthly arrays (i.e. the
+// prior calendar day, or the prior calendar month) — the first row in each
+// series has no prior row to compare to, so it shows '—'. Like the charts,
+// buildTables() runs once on load with the full history and again on every
+// Filter click, scoped to the selected sub-range.
+// Split into six per-metal grids (Daily Gold/Silver/Ratio, Monthly
+// Gold/Silver/Ratio) so each table sits directly under its matching chart
+// and price box in the Gold | Silver | Ratio column order used throughout
+// the page, instead of one wide combined table per period.
+let dailyGoldGridInst, dailySilverGridInst, dailyRatioGridInst;
+let monthlyGoldGridInst, monthlySilverGridInst, monthlyRatioGridInst;
+
+// Raw (unfiltered) row data for each table, refreshed by buildTables() every
+// time it runs (initial load, or after a Date Range Filter click). The two
+// group search boxes ("Daily Data" / "Monthly Data") filter from these
+// caches — see applyGroupSearch() below — instead of each table having its
+// own built-in Grid.js search box.
+let dailyGroupData = { gold: [], silver: [], ratio: [] };
+let monthlyGroupData = { gold: [], silver: [], ratio: [] };
+
+// Cells are formatted strings (money, or an HTML-wrapped Δ% span), so strip
+// any HTML tags before matching plain text against the search query.
+function rowMatchesQuery(row, query) {
+  if (!query) return true;
+  return row.some(cell => String(cell).replace(/<[^>]*>/g, '').toLowerCase().includes(query));
+}
+
+function renderOrUpdateGrid(inst, elementId, columns, data) {
+  if (inst) {
+    inst.updateConfig({ data }).forceRender();
+    return inst;
+  }
+  return new gridjs.Grid({
+    columns, data, sort: false, search: false,
+    style: { table: { fontSize: '13px' } }
+  }).render(document.getElementById(elementId));
+}
+
+function buildTables(dailyArr, monthlyArr) {
+  const dailyGoldData = dailyArr.map((d, i) => {
+    const prev = i > 0 ? dailyArr[i - 1] : null;
+    const goldPct = prev ? ((d.gold - prev.gold) / prev.gold) * 100 : null;
+    return [d.date, fmtMoney(d.gold), fmtPctHtml(goldPct)];
+  }).reverse();
+  const dailySilverData = dailyArr.map((d, i) => {
+    const prev = i > 0 ? dailyArr[i - 1] : null;
+    const silverPct = prev ? ((d.silver - prev.silver) / prev.silver) * 100 : null;
+    return [d.date, fmtMoney(d.silver), fmtPctHtml(silverPct)];
+  }).reverse();
+  const dailyRatioData = dailyArr.map(d => [d.date, fmt(d.ratio, 2)]).reverse();
+
+  const monthlyGoldData = monthlyArr.map((m, i) => {
+    const prev = i > 0 ? monthlyArr[i - 1] : null;
+    const goldPct = prev ? ((m.gold_avg - prev.gold_avg) / prev.gold_avg) * 100 : null;
+    return [m.month, fmtMoney(m.gold_avg), fmtPctHtml(goldPct)];
+  }).reverse();
+  const monthlySilverData = monthlyArr.map((m, i) => {
+    const prev = i > 0 ? monthlyArr[i - 1] : null;
+    const silverPct = prev ? ((m.silver_avg - prev.silver_avg) / prev.silver_avg) * 100 : null;
+    return [m.month, fmtMoney(m.silver_avg), fmtPctHtml(silverPct)];
+  }).reverse();
+  const monthlyRatioData = monthlyArr.map(m => [m.month, fmt(m.ratio_avg, 2), String(m.days)]).reverse();
+
+  dailyGroupData = { gold: dailyGoldData, silver: dailySilverData, ratio: dailyRatioData };
+  monthlyGroupData = { gold: monthlyGoldData, silver: monthlySilverData, ratio: monthlyRatioData };
+
+  const dailyQuery = dailySearchInput.value.trim().toLowerCase();
+  const monthlyQuery = monthlySearchInput.value.trim().toLowerCase();
+
+  // No per-column `width` here on purpose — see the CSS comment above the
+  // #dailyGoldTable nth-child rules for why. Column sizing is CSS's job now.
+  dailyGoldGridInst = renderOrUpdateGrid(dailyGoldGridInst, 'dailyGoldTable', [
+    { name: 'Date' },
+    { name: 'Gold ($/oz)' },
+    { name: 'Gold Δ%', formatter: (cell) => gridjs.html(cell) }
+  ], dailyGoldData.filter(r => rowMatchesQuery(r, dailyQuery)));
+
+  dailySilverGridInst = renderOrUpdateGrid(dailySilverGridInst, 'dailySilverTable', [
+    { name: 'Date' },
+    { name: 'Silver ($/oz)' },
+    { name: 'Silver Δ%', formatter: (cell) => gridjs.html(cell) }
+  ], dailySilverData.filter(r => rowMatchesQuery(r, dailyQuery)));
+
+  dailyRatioGridInst = renderOrUpdateGrid(dailyRatioGridInst, 'dailyRatioTable', [
+    { name: 'Date' },
+    { name: 'Ratio' }
+  ], dailyRatioData.filter(r => rowMatchesQuery(r, dailyQuery)));
+
+  monthlyGoldGridInst = renderOrUpdateGrid(monthlyGoldGridInst, 'monthlyGoldTable', [
+    { name: 'Month' },
+    { name: 'Gold Avg ($/oz)' },
+    { name: 'Gold Δ%', formatter: (cell) => gridjs.html(cell) }
+  ], monthlyGoldData.filter(r => rowMatchesQuery(r, monthlyQuery)));
+
+  monthlySilverGridInst = renderOrUpdateGrid(monthlySilverGridInst, 'monthlySilverTable', [
+    { name: 'Month' },
+    { name: 'Silver Avg ($/oz)' },
+    { name: 'Silver Δ%', formatter: (cell) => gridjs.html(cell) }
+  ], monthlySilverData.filter(r => rowMatchesQuery(r, monthlyQuery)));
+
+  monthlyRatioGridInst = renderOrUpdateGrid(monthlyRatioGridInst, 'monthlyRatioTable', [
+    { name: 'Month' },
+    { name: 'Ratio' },
+    { name: 'Days' }
+  ], monthlyRatioData.filter(r => rowMatchesQuery(r, monthlyQuery)));
+}
+
+// ---------- Date Range filter ----------
+// Recomputes the monthly rollup from whatever subset of DAILY falls within
+// the selected range — not by filtering the pre-computed full-history
+// MONTHLY array by month — so a partial first/last month in the selection
+// (e.g. Jan 15 through Mar 10) averages only the days actually in range,
+// matching what generate_html_dashboard.py's Python grouping would produce
+// if it had been run on that same subset.
+function computeMonthlyFromDaily(dailyArr) {
+  const groups = {};
+  dailyArr.forEach(d => {
+    const key = d.date.slice(0, 7);
+    (groups[key] = groups[key] || []).push(d);
+  });
+  return Object.keys(groups).sort().map(month => {
+    const vals = groups[month];
+    const n = vals.length;
+    const goldAvg = vals.reduce((s, v) => s + v.gold, 0) / n;
+    const silverAvg = vals.reduce((s, v) => s + v.silver, 0) / n;
+    const ratioAvg = vals.reduce((s, v) => s + v.ratio, 0) / n;
+    return { month, gold_avg: goldAvg, silver_avg: silverAvg, ratio_avg: ratioAvg, days: n };
+  });
+}
+
+const startRangeInput = document.getElementById('startRange');
+const endRangeInput = document.getElementById('endRange');
+const startDateInput = document.getElementById('startDateInput');
+const endDateInput = document.getElementById('endDateInput');
+const trackHighlight = document.getElementById('trackHighlight');
+const filterBtn = document.getElementById('filterBtn');
+const resetBtn = document.getElementById('resetBtn');
+
+const sliderMin = epochDay(DAILY[0].date);
+const sliderMax = epochDay(DAILY[DAILY.length - 1].date);
+[startRangeInput, endRangeInput].forEach(el => { el.min = sliderMin; el.max = sliderMax; el.step = 1; });
+startRangeInput.value = sliderMin;
+endRangeInput.value = sliderMax;
+// The calendar pickers are bounded to the same span as the slider so a typed
+// or picked date can never fall outside the available data.
+[startDateInput, endDateInput].forEach(el => { el.min = DAILY[0].date; el.max = DAILY[DAILY.length - 1].date; });
+
+function isoFromEpoch(epoch) {
+  const d = new Date(epoch * 86400000);
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${mm}-${dd}`;
+}
+function updateSliderUI() {
+  const s = +startRangeInput.value;
+  const e = +endRangeInput.value;
+  startDateInput.value = isoFromEpoch(s);
+  endDateInput.value = isoFromEpoch(e);
+  const span = (sliderMax - sliderMin) || 1;
+  const leftPct = ((s - sliderMin) / span) * 100;
+  const rightPct = ((e - sliderMin) / span) * 100;
+  trackHighlight.style.left = leftPct + '%';
+  trackHighlight.style.width = Math.max(0, rightPct - leftPct) + '%';
+  // Keep whichever thumb is past the midpoint on top, so the two thumbs
+  // stay independently draggable even when their values are equal or close.
+  startRangeInput.style.zIndex = ((s - sliderMin) / span) > 0.5 ? 5 : 3;
+  endRangeInput.style.zIndex = 4;
+}
+startRangeInput.addEventListener('input', () => {
+  if (+startRangeInput.value > +endRangeInput.value) startRangeInput.value = endRangeInput.value;
+  updateSliderUI();
+});
+endRangeInput.addEventListener('input', () => {
+  if (+endRangeInput.value < +startRangeInput.value) endRangeInput.value = startRangeInput.value;
+  updateSliderUI();
+});
+// Calendar pickers drive the slider the same way the slider drives them:
+// picking a date clamps it into range, keeps start <= end, moves the
+// matching thumb, and refreshes both pickers/track via updateSliderUI().
+startDateInput.addEventListener('change', () => {
+  if (!startDateInput.value) { updateSliderUI(); return; }
+  let v = epochDay(startDateInput.value);
+  v = Math.max(sliderMin, Math.min(sliderMax, v));
+  if (v > +endRangeInput.value) v = +endRangeInput.value;
+  startRangeInput.value = v;
+  updateSliderUI();
+});
+endDateInput.addEventListener('change', () => {
+  if (!endDateInput.value) { updateSliderUI(); return; }
+  let v = epochDay(endDateInput.value);
+  v = Math.max(sliderMin, Math.min(sliderMax, v));
+  if (v < +startRangeInput.value) v = +startRangeInput.value;
+  endRangeInput.value = v;
+  updateSliderUI();
+});
+updateSliderUI();
+
+filterBtn.addEventListener('click', () => {
+  const s = +startRangeInput.value;
+  const e = +endRangeInput.value;
+  const filteredDaily = DAILY.filter(d => { const ed = epochDay(d.date); return ed >= s && ed <= e; });
+  if (filteredDaily.length === 0) return;
+  const filteredMonthly = computeMonthlyFromDaily(filteredDaily);
+  buildCharts(filteredDaily, filteredMonthly);
+  buildTables(filteredDaily, filteredMonthly);
+});
+
+// Reset snaps both handles (and the linked calendar pickers) back to the
+// full available range and immediately rebuilds the charts/tables from the
+// full, unfiltered history — unlike dragging the slider alone, Reset takes
+// effect right away rather than waiting for a Filter click.
+resetBtn.addEventListener('click', () => {
+  startRangeInput.value = sliderMin;
+  endRangeInput.value = sliderMax;
+  updateSliderUI();
+  buildCharts(DAILY, MONTHLY);
+  buildTables(DAILY, MONTHLY);
+});
+
+// ---------- Grouped table search ----------
+// One search box per period (Daily / Monthly), above that period's three
+// tables, instead of a separate search box on every table. Typing filters
+// all three of that period's tables at once, from the raw row data
+// buildTables() cached in dailyGroupData/monthlyGroupData, without needing
+// a full chart/table rebuild.
+const dailySearchInput = document.getElementById('dailySearchInput');
+const monthlySearchInput = document.getElementById('monthlySearchInput');
+
+function applyGroupSearch(period) {
+  const isDaily = period === 'daily';
+  const data = isDaily ? dailyGroupData : monthlyGroupData;
+  const query = (isDaily ? dailySearchInput.value : monthlySearchInput.value).trim().toLowerCase();
+  const goldRows = data.gold.filter(r => rowMatchesQuery(r, query));
+  const silverRows = data.silver.filter(r => rowMatchesQuery(r, query));
+  const ratioRows = data.ratio.filter(r => rowMatchesQuery(r, query));
+  const goldInst = isDaily ? dailyGoldGridInst : monthlyGoldGridInst;
+  const silverInst = isDaily ? dailySilverGridInst : monthlySilverGridInst;
+  const ratioInst = isDaily ? dailyRatioGridInst : monthlyRatioGridInst;
+  if (goldInst) goldInst.updateConfig({ data: goldRows }).forceRender();
+  if (silverInst) silverInst.updateConfig({ data: silverRows }).forceRender();
+  if (ratioInst) ratioInst.updateConfig({ data: ratioRows }).forceRender();
+}
+dailySearchInput.addEventListener('input', () => applyGroupSearch('daily'));
+monthlySearchInput.addEventListener('input', () => applyGroupSearch('monthly'));
+
+buildCharts(DAILY, MONTHLY);
+buildTables(DAILY, MONTHLY);
+
+// ---------- Live current price ----------
+// Fetched on load if nothing is cached yet. The Refresh button only calls the
+// API if the last successful API call was 30+ minutes ago; otherwise the
+// click is a silent no-op (no API call, no change to the price or the
+// "Last fetched" label — that label always reflects the last real API call,
+// never a button click).
+const CACHE_KEY = 'goldSilverSpotCache';
+const STALE_MS = 30 * 60 * 1000;
+const GOLD_TOOL = 'mcp__e4fa3225-233d-4e19-9977-d520dfd92054__GOLD_SILVER_SPOT';
+
+function readCache() {
+  try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); } catch (e) { return null; }
+}
+function writeCache(obj) {
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify(obj)); } catch (e) {}
+}
+function minutesAgo(ts) {
+  return Math.max(0, Math.round((Date.now() - ts) / 60000));
+}
+function formatDateOnly(iso) {
+  if (!iso) return '';
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const [y, m, d] = iso.split('-').map(Number);
+  return `${MONTHS[m - 1]}-${String(d).padStart(2, '0')}-${y}`;
+}
+function isoDateFromTs(ts) {
+  const d = new Date(ts);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+function addDaysIso(iso, delta) {
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + delta);
+  const yy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getUTCDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+// Builds a ms timestamp that reproduces `iso` when read back through local
+// Date getters (isoDateFromTs), regardless of the viewer's timezone. Used
+// only for the static baked-in-data fallback below — never a real fetch
+// time — so a UTC-midnight round-trip that could shift a day in negative-
+// offset timezones would be wrong here; a local-midnight Date does not.
+function localTsFromIso(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d).getTime();
+}
+// When live fetching isn't possible at all (e.g. this page hosted as a
+// plain static site outside Cowork, with no bridge to call the price tool)
+// and there's no cached price either — typically a visitor's very first
+// load — fall back to the most recent row already baked into DAILY, rather
+// than leaving the price cards blank. This is the same row the charts and
+// tables already end on, so the fallback price, the chart's last point, and
+// the table's first (most-recent) row all agree.
+function lastKnownFallback() {
+  const row = DAILY[DAILY.length - 1];
+  return { gold: row.gold, silver: row.silver, date: row.date };
+}
+// The comparison baseline always tracks whatever date is currently shown as
+// "As of" — i.e. the date of the live-fetched (or cached) price — not a
+// fixed date baked in at generation time. Given that as-of date, walk back
+// to find the closest earlier date that actually has data (normally just
+// one day back; a short walk handles any gaps in the workbook).
+function getPrevCloseForTs(ts) {
+  const asOfDate = isoDateFromTs(ts);
+  for (let back = 1; back <= 10; back++) {
+    const candidate = addDaysIso(asOfDate, -back);
+    const row = DAILY_BY_DATE[candidate];
+    if (row) return { gold: row.gold, silver: row.silver, ratio: row.ratio, date: candidate };
+  }
+  return null;
+}
+function renderChangeBox(prefix, current, prevClose, prevDate, formatFn) {
+  formatFn = formatFn || fmtMoney;
+  const valueEl = document.getElementById(prefix + 'ChangeValue');
+  const metaEl = document.getElementById(prefix + 'ChangeMeta');
+  valueEl.classList.remove('change-positive', 'change-negative', 'change-bold');
+  if (!current || !prevClose) {
+    valueEl.textContent = '—';
+    metaEl.textContent = '';
+    return;
+  }
+  const pct = ((current - prevClose) / prevClose) * 100;
+  const sign = pct >= 0 ? '+' : '';
+  // Day-over-day moves in gold/silver spot prices are often well under
+  // 0.01%; at 2 decimal places those round down to a misleading "0.00%".
+  // Show more precision for small moves so a real (if tiny) change is
+  // still visible, while keeping normal 2-decimal formatting for typical
+  // moves.
+  const decimals = (pct !== 0 && Math.abs(pct) < 0.01) ? 4 : 2;
+  valueEl.textContent = `${sign}${pct.toFixed(decimals)}%`;
+  valueEl.classList.add(pct >= 0 ? 'change-positive' : 'change-negative');
+  if (Math.abs(pct) >= 5) valueEl.classList.add('change-bold');
+  metaEl.textContent = `vs. ${formatFn(prevClose)} on ${formatDateOnly(prevDate)}`;
+}
+function formatLastFetched(ts) {
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const d = new Date(ts);
+  const mon = MONTHS[d.getMonth()];
+  const day = String(d.getDate()).padStart(2, '0');
+  const year = d.getFullYear();
+  let hh = d.getHours();
+  const ampm = hh >= 12 ? 'PM' : 'AM';
+  hh = hh % 12;
+  if (hh === 0) hh = 12;
+  const hhStr = String(hh).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${mon}-${day}-${year} ${hhStr}:${mm} ${ampm}`;
+}
+// Indicative dealer buy/sell pricing derived from the spot price. Gold is a
+// percentage spread (spot ± a % of spot); silver is a flat dollar spread
+// (spot ± a fixed $ amount) — these are two different conventions on
+// purpose, matching how each metal's spread was specified.
+const GOLD_BUY_PCT = 0.035;   // spot + 3.5%
+const GOLD_SELL_PCT = 0.025;  // spot - 2.5%
+const SILVER_BUY_FLAT = 5;    // spot + $5.00
+const SILVER_SELL_FLAT = 2.5; // spot - $2.50
+// `source` is 'live' (just fetched), 'cached' (localStorage, real fetch at
+// some earlier time), or 'fallback' (no live fetch possible and nothing
+// cached — showing the last row already baked into DAILY instead of a
+// blank card). Only the As-of/footer wording differs by source; the price
+// math (buy/sell, vs.-yesterday change) is identical either way.
+function renderPrices(gold, silver, ts, source) {
+  const ratio = (gold && silver) ? gold / silver : null;
+  document.getElementById('goldValue').textContent = fmtMoney(gold);
+  document.getElementById('silverValue').textContent = fmtMoney(silver);
+  document.getElementById('ratioValue').textContent = ratio === null ? '—' : fmt(ratio, 2);
+  document.getElementById('goldBuyValue').textContent = gold ? fmtMoney(gold * (1 + GOLD_BUY_PCT)) : '—';
+  document.getElementById('goldSellValue').textContent = gold ? fmtMoney(gold * (1 - GOLD_SELL_PCT)) : '—';
+  document.getElementById('silverBuyValue').textContent = silver ? fmtMoney(silver + SILVER_BUY_FLAT) : '—';
+  document.getElementById('silverSellValue').textContent = silver ? fmtMoney(silver - SILVER_SELL_FLAT) : '—';
+  // Always compare against exactly one day before whatever date is being
+  // shown as "As of" (the live/cached fetch date) — not a fixed date baked
+  // in at generation time. So a fetch dated Aug 15 compares to Aug 14, a
+  // fetch dated Aug 16 compares to Aug 15, etc., regardless of "today".
+  const prevClose = getPrevCloseForTs(ts) || PREV_CLOSE;
+  renderChangeBox('gold', gold, prevClose.gold, prevClose.date);
+  renderChangeBox('silver', silver, prevClose.silver, prevClose.date);
+  renderChangeBox('ratio', ratio, prevClose.ratio, prevClose.date, (n) => fmt(n, 2));
+  // 'fallback' has no real fetch time to show (it's a static row baked in
+  // at generation time), so it gets its own date-only wording instead of
+  // formatLastFetched's fake "12:00 AM".
+  if (source === 'fallback') {
+    const dateOnly = formatDateOnly(isoDateFromTs(ts));
+    const asOfText = `As of ${dateOnly}`;
+    document.getElementById('goldMeta').textContent = asOfText;
+    document.getElementById('silverMeta').textContent = asOfText;
+    document.getElementById('ratioMeta').textContent = asOfText;
+    document.getElementById('cacheNote').textContent = `Last available ${dateOnly}`;
+  } else {
+    const when = formatLastFetched(ts);
+    const asOfText = `As of ${when}`;
+    document.getElementById('goldMeta').textContent = asOfText;
+    document.getElementById('silverMeta').textContent = asOfText;
+    document.getElementById('ratioMeta').textContent = asOfText;
+    document.getElementById('cacheNote').textContent = `Last fetched ${when}`;
+  }
+}
+function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+// Both bridge functions only exist when this page is actually running
+// inside Cowork's artifact host. On a plain static host (e.g. this file
+// published on GitHub Pages) `window.cowork` is undefined entirely, so
+// both of these are false there — which is what keeps the fallback path
+// below from ever attempting a price fetch OR a workbook write.
+function hasPriceBridge() {
+  return !!(window.cowork && typeof window.cowork.callMcpTool === 'function');
+}
+function hasWorkbookBridge() {
+  return !!(window.cowork && typeof window.cowork.runScheduledTask === 'function');
+}
+
+async function fetchSpot(symbol) {
+  const r = await window.cowork.callMcpTool(GOLD_TOOL, { symbol });
+  const data = r.structuredContent ?? JSON.parse(r.content[0].text);
+  if (r.isError || (data && data.error)) {
+    throw new Error((data && data.error && data.error.message) || ('Tool error fetching ' + symbol));
+  }
+  const price = parseFloat(data.price);
+  if (isNaN(price)) throw new Error('Bad price for ' + symbol);
+  return price;
+}
+// The underlying API allows ~1 request/second, so fetch gold and silver
+// sequentially (not in parallel) with a short gap, and retry once on failure
+// (e.g. a rate-limit hiccup) after a brief backoff.
+async function fetchSpotWithRetry(symbol) {
+  try {
+    return await fetchSpot(symbol);
+  } catch (e) {
+    await sleep(1500);
+    return await fetchSpot(symbol);
+  }
+}
+// Renders whatever's already available (a real cached price, or else the
+// last row baked into DAILY) without attempting another live call — used
+// whenever a live fetch isn't possible or just failed.
+function renderBestAvailable() {
+  const cached = readCache();
+  if (cached) {
+    renderPrices(cached.gold, cached.silver, cached.ts, 'cached');
+  } else {
+    const fb = lastKnownFallback();
+    renderPrices(fb.gold, fb.silver, localTsFromIso(fb.date), 'fallback');
+  }
+}
+async function fetchLive(showLoading) {
+  const btn = document.getElementById('refreshBtn');
+  btn.disabled = true;
+  if (showLoading) {
+    document.getElementById('goldMeta').textContent = 'Fetching…';
+    document.getElementById('silverMeta').textContent = 'Fetching…';
+  }
+  // No Cowork host to call the price tool through at all (e.g. this page
+  // is hosted as a plain static site) — skip straight to the best
+  // available price instead of retrying a call that can never succeed.
+  if (!hasPriceBridge()) {
+    renderBestAvailable();
+    btn.disabled = false;
+    return;
+  }
+  try {
+    const gold = await fetchSpotWithRetry('GOLD');
+    await sleep(1200);
+    const silver = await fetchSpotWithRetry('SILVER');
+    const ts = Date.now();
+    writeCache({ gold, silver, ts });
+    renderPrices(gold, silver, ts, 'live');
+  } catch (e) {
+    console.error(e);
+    renderBestAvailable();
+  } finally {
+    btn.disabled = false;
+  }
+}
+const WORKBOOK_TASK_ID = 'gold-silver-dashboard-daily-update';
+document.getElementById('refreshBtn').addEventListener('click', () => {
+  // Gate everything on staleness: if the last successful fetch was under
+  // 30 minutes ago, this click is a total no-op — no API call, no workbook
+  // update, no status message. Only once the cache is stale do we fetch a
+  // live price AND kick off the daily scheduled task (which re-fetches
+  // gold/silver and writes them into both xlsx workbooks).
+  const cached = readCache();
+  const isStale = !cached || (Date.now() - cached.ts) >= STALE_MS;
+  if (!isStale) return;
+
+  // The workbook-update trigger only ever fires when a real Cowork host
+  // bridge is present (hasWorkbookBridge()). On a plain static host this
+  // is false, so this click never attempts to write to either xlsx
+  // workbook — it only re-runs fetchLive() below, which (bridge-less)
+  // falls straight back to the best available price instead.
+  const statusEl = document.getElementById('workbookStatus');
+  if (hasWorkbookBridge()) {
+    statusEl.textContent = 'Workbook update requested…';
+    try {
+      window.cowork.runScheduledTask(WORKBOOK_TASK_ID);
+    } catch (e) {
+      console.error(e);
+      statusEl.textContent = 'Could not trigger workbook update.';
+    }
+    setTimeout(() => { statusEl.textContent = ''; }, 8000);
+  }
+  fetchLive(true);
+});
+
+(function init() {
+  const cached = readCache();
+  if (cached) {
+    renderPrices(cached.gold, cached.silver, cached.ts, 'cached');
+  } else {
+    fetchLive(true);
+  }
+})();
+</script>
+</body>
+</html>
